@@ -25,7 +25,7 @@ function defaultState() {
     records: {},
     company: '',
     footerNote: 'Lütfen bu tutara fatura kesiniz.',
-    aiEngine: 'claude',
+    aiEngine: 'gemini',
     updatedAt: 0,
   };
 }
@@ -176,6 +176,11 @@ $('#period').onchange = render;
 
 // Eski kayıtlara sonradan eklenen varsayılanları bir kez uygular
 function migrate() {
+  if (!state.migratedGemini) {
+    state.migratedGemini = true;
+    if (state.aiEngine === 'claude' && !state.claudeKey) state.aiEngine = 'gemini';
+    save();
+  }
   if (!state.migratedHaftasonu) {
     state.migratedHaftasonu = true;
     if (!state.categories.some(c => c.id === 'haftasonu')) {
@@ -945,7 +950,11 @@ const AI = {
   claude: { label: 'Claude', keyField: 'claudeKey', modelField: 'claudeModel', model: 'claude-sonnet-5-5' },
   gemini: { label: 'Gemini', keyField: 'geminiKey', modelField: 'geminiModel', model: 'gemini-2.5-flash' },
 };
-const engine = () => state.aiEngine || 'claude';
+const engine = () => {
+  const sel = state.aiEngine || 'gemini';
+  if (sel === 'ocr' || state[AI[sel]?.keyField]) return sel;
+  return Object.keys(AI).find(k => state[AI[k].keyField]) || sel;
+};
 const aiReady = () => AI[engine()] && !!state[AI[engine()].keyField];
 
 // Görüntüyü yapay zekâya göndermek için JPEG'e çevirir (küçük rakamlar bozulmasın diye yüksek kalite)
@@ -1027,9 +1036,8 @@ async function readWithClaude(b64) {
   return (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
-async function readWithGemini(b64) {
-  const model = state.geminiModel || AI.gemini.model;
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+async function geminiCall(model, b64) {
+  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': state.geminiKey },
     body: JSON.stringify({
@@ -1037,6 +1045,33 @@ async function readWithGemini(b64) {
       generationConfig: { temperature: 0, responseMimeType: 'application/json' },
     }),
   });
+}
+
+// Model adı kullanımdan kalkarsa hesabın erişebildiği en yeni "flash" modelini bulur
+async function latestGeminiFlash() {
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
+    headers: { 'x-goog-api-key': state.geminiKey },
+  });
+  const body = await r.json().catch(() => ({}));
+  const names = (body.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => m.name.replace(/^models\//, ''))
+    .filter(n => /flash/.test(n) && !/lite|tts|image|audio|live|exp|preview/.test(n));
+  const ver = n => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  return names.sort((a, b) => ver(b) - ver(a) || a.length - b.length)[0];
+}
+
+async function readWithGemini(b64) {
+  let model = state.geminiModel || AI.gemini.model;
+  let r = await geminiCall(model, b64);
+  if (r.status === 404) {
+    const alt = await latestGeminiFlash();
+    if (alt && alt !== model) {
+      model = alt;
+      r = await geminiCall(model, b64);
+      if (r.ok) { state.geminiModel = model; save(); }
+    }
+  }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error('Gemini: ' + (body.error?.message || r.status));
   return (body.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
