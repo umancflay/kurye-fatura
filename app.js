@@ -1396,42 +1396,41 @@ async function previewInvoice(pid) {
 }
 
 const isTouch = () => matchMedia('(pointer: coarse)').matches;
+const chatUrl = phone => isTouch() ? `https://wa.me/${phone}` : `https://web.whatsapp.com/send?phone=${phone}`;
 
-// Bilgisayarda tek bir WhatsApp Web sekmesi kullanılır; her kişide aynı sekme o sohbete gider
-function openChat(phone) {
-  const url = isTouch() ? `https://wa.me/${phone}` : `https://web.whatsapp.com/send?phone=${phone}`;
-  window.open(url, 'kuryeWhatsApp');
-}
-
-async function sendWhatsApp(pid) {
+// Görseli panoya kopyalar; indirme yok. Kopyalanamazsa görsel ekranda gösterilir (basılı tut → kopyala)
+async function prepareSend(pid) {
   const p = personById(pid);
   const phone = waNumber(p.phone);
+  if (!phone) { toast(`${p.name}: numara yok`); return null; }
   const blobPromise = renderInvoice(pid);
-
-  // Telefon: paylaşım menüsünden WhatsApp → kişi
-  if (isTouch() && navigator.canShare) {
-    const file = new File([await blobPromise], fileName(pid), { type: 'image/png' });
-    if (navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file] });
-        markSent(pid);
-      } catch (e) { if (e.name !== 'AbortError') toast('Paylaşılamadı: ' + e.message); }
-      return;
-    }
-  }
-
-  // Bilgisayar: görsel panoya, sohbet açılır → Ctrl+V, Enter
   let copied = false;
   try {
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
     copied = true;
-  } catch {
-    downloadBlob(await blobPromise, fileName(pid));
-  }
-  if (!phone) { toast(`${p.name}: numara yok`); return; }
-  openChat(phone);
-  toast(copied ? 'Kopyalandı — Ctrl+V, Enter' : 'İndirildi', 3000);
-  markSent(pid);
+  } catch {}
+  return { p, url: chatUrl(phone), copied, img: copied ? '' : URL.createObjectURL(await blobPromise) };
+}
+
+// Bilgisayarda kopyalama + sohbet aynı tıkta; telefonda sohbet ikinci dokunuşla açılır
+function openChatNow(s) {
+  if (!s.copied || isTouch()) return false;
+  return !!window.open(s.url, 'kuryeWhatsApp');
+}
+
+async function sendWhatsApp(pid) {
+  const s = await prepareSend(pid);
+  if (!s) return;
+  if (openChatNow(s)) { toast('Kopyalandı · Ctrl+V'); markSent(pid); return; }
+  openModal(`
+    <h2>${esc(s.p.name)}</h2>
+    ${s.copied ? '<p class="muted">Kopyalandı</p>' : `<img src="${s.img}" alt="Fatura"><p class="muted small">Görsele basılı tut → Kopyala</p>`}
+    <div class="row gap end" style="margin-top:12px">
+      <button value="close" class="secondary">Kapat</button>
+      <a class="button wa" href="${s.url}" target="kuryeWhatsApp" rel="noopener" data-x="open">WhatsApp'ı aç</a>
+    </div>`, () => s.img && URL.revokeObjectURL(s.img), {
+    open: () => { markSent(pid); setTimeout(closeModal, 300); },
+  });
 }
 
 function downloadBlob(blob, name) {
@@ -1482,12 +1481,17 @@ $('#bulkSend').onclick = () => {
   const list = peopleWithRecords();
   if (!list.length) { toast('Bu ay kayıt yok'); return; }
   const recs = state.records[currentPeriod()];
+  const ready = {}; // hazırlanmış (kopyalanmış) ama sohbeti henüz açılmamış kişiler
   const rows = () => list.map(p => {
     const sent = !!recs[p.id]?.sentAt;
+    const r = ready[p.id];
+    const action = r
+      ? `${r.img ? `<img class="sthumb" src="${r.img}" alt="Fatura">` : ''}<a class="button wa" href="${r.url}" target="kuryeWhatsApp" rel="noopener" data-x="open"><svg><use href="#i-wa"/></svg>Aç</a>`
+      : `<button type="button" class="${sent ? 'secondary' : 'wa'}" data-x="send">${sent ? '✓' : 'Gönder'}</button>`;
     return `<div class="sendrow ${sent ? 'done' : ''}" data-id="${p.id}">
       <span class="avatar">${esc(initials(p.name))}</span>
-      <div class="sname"><b>${esc(p.name)}</b><span>${money(calc(p, recs[p.id]).net)}${p.phone ? '' : ' · numara yok'}</span></div>
-      <button type="button" class="${sent ? 'secondary' : 'wa'}" data-x="send">${sent ? '✓' : 'Gönder'}</button>
+      <div class="sname"><b>${esc(p.name)}</b><span>${money(calc(p, recs[p.id]).net)}${p.phone ? '' : ' · numara yok'}${r ? (r.copied ? ' · kopyalandı' : ' · basılı tut → kopyala') : ''}</span></div>
+      ${action}
     </div>`;
   }).join('');
   const nextId = () => list.find(p => !recs[p.id]?.sentAt && p.phone)?.id;
@@ -1497,7 +1501,15 @@ $('#bulkSend').onclick = () => {
     $('#sendRows').querySelector(`[data-id="${n}"]`)?.classList.add('next');
     $('#sendCount').textContent = `${list.filter(p => recs[p.id]?.sentAt).length} / ${list.length}`;
   };
-  const send = async id => { if (!id) return; await sendWhatsApp(id); draw(); };
+  const send = async id => {
+    if (!id) return;
+    const s = await prepareSend(id);
+    if (!s) return;
+    if (openChatNow(s)) { toast('Kopyalandı · Ctrl+V'); markSent(id); }
+    else ready[id] = s;
+    draw();
+  };
+  const opened = id => { const r = ready[id]; delete ready[id]; if (r?.img) setTimeout(() => URL.revokeObjectURL(r.img), 60000); markSent(id); draw(); };
   const onKey = e => {
     if (e.key === 'Enter' && $('#modal').open && $('#sendRows')) { e.preventDefault(); send(nextId()); }
   };
@@ -1509,6 +1521,7 @@ $('#bulkSend').onclick = () => {
       <button value="close">Kapat</button>
     </div>`, () => document.removeEventListener('keydown', onKey), {
     send: e => send(e.target.closest('[data-id]').dataset.id),
+    open: e => setTimeout(() => opened(e.target.closest('[data-id]').dataset.id), 300),
     reset: () => { for (const p of list) delete recs[p.id].sentAt; save(); renderPeriod(); draw(); },
   });
   document.addEventListener('keydown', onKey);
