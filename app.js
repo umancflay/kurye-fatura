@@ -1036,15 +1036,36 @@ async function readWithClaude(b64) {
   return (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
+// Tablo okumak için "düşünme" gereksiz ve yavaşlatıyor: modelin izin verdiği en düşük seviyeye çek
+function geminiThinking(model) {
+  if (/gemini-2\.5-flash/.test(model)) return { thinkingBudget: 0 };
+  if (/gemini-2\.5-pro/.test(model)) return { thinkingBudget: 128 };
+  if (/gemini-[3-9]/.test(model)) return { thinkingLevel: 'low' };
+  return null;
+}
+
+const GEMINI_TIMEOUT = 45000;
 async function geminiCall(model, b64) {
-  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': state.geminiKey },
-    body: JSON.stringify({
-      contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: aiPrompt() }] }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-    }),
-  });
+  const thinkingConfig = geminiThinking(model);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), GEMINI_TIMEOUT);
+  try {
+    return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': state.geminiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: aiPrompt() }] }],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json', ...(thinkingConfig && { thinkingConfig }) },
+      }),
+    });
+  } catch (e) {
+    // Süre aşımı yoğunluk gibi ele alınır: sıradaki modele geçilir
+    if (e.name === 'AbortError') return new Response(JSON.stringify({ error: { message: `${model} ${GEMINI_TIMEOUT / 1000} sn içinde cevap vermedi` } }), { status: 504 });
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Hesabın erişebildiği Gemini modelleri: en yeni "flash" önce, sonra "flash-lite", sonra "pro"
@@ -1083,7 +1104,7 @@ async function readWithGemini(b64, onStatus = () => {}) {
       if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini: ' + lastError);
       if (!busy(r.status) || attempt) return null; // 404 vb. ya da ikinci denemede de yoğun
       onStatus(`${model} yoğun, tekrar deneniyor…`);
-      await sleep(2000);
+      await sleep(1000);
     }
     return null;
   };
@@ -1138,15 +1159,20 @@ function handleFiles(files) {
     const st = item.querySelector('.st');
     // Görüntüler sırayla okunur
     ocrQueue = ocrQueue.then(async () => {
+      const t0 = Date.now();
+      let label = '';
+      const tick = setInterval(() => { if (label) st.textContent = `${label} ${Math.round((Date.now() - t0) / 1000)} sn`; }, 500);
       try {
         const { found, text, via } = await readScreenshot(file, m => {
-          if (m.status === 'ai') st.textContent = m.msg || `${AI[engine()].label} okuyor…`;
+          if (m.status === 'ai') st.textContent = label = m.msg || `${AI[engine()].label} okuyor…`;
           else if (m.status === 'recognizing text') st.textContent = `Okunuyor… %${Math.round(m.progress * 100)}`;
           else st.textContent = 'Okuma modülü hazırlanıyor (ilk seferde biraz sürer)…';
         });
+        clearInterval(tick);
+        const took = `${Math.round((Date.now() - t0) / 1000)} sn`;
         st.textContent = found.length
-          ? `${via} · ${found.length} kişi okundu: ${found.map(f => f.name || '(isim yok)').join(', ')}`
-          : `${via} · paket sayısı bulunamadı — okunan metne bak`;
+          ? `${via} · ${took} · ${found.length} kişi okundu: ${found.map(f => f.name || '(isim yok)').join(', ')}`
+          : `${via} · ${took} · paket sayısı bulunamadı — okunan metne bak`;
         item.querySelector('.qbody').insertAdjacentHTML('beforeend',
           `<details><summary class="small muted">Okunan metin</summary><pre class="ocr">${esc(text)}</pre></details>`);
         for (const f of found) {
@@ -1157,6 +1183,7 @@ function handleFiles(files) {
           else pending.push({ key: uid(), name: f.name || 'İsim okunamadı', counts: f.counts, personId: p?.id || '', img: imgUrl, auto: via !== 'OCR' });
         }
       } catch (err) {
+        clearInterval(tick);
         st.innerHTML = `<span class="err">Okunamadı: ${esc(err.message || err)}</span>`;
       }
       renderReview();
