@@ -24,6 +24,7 @@ function defaultState() {
     records: {},
     company: '',
     footerNote: 'Lütfen bu tutara fatura kesiniz.',
+    aiEngine: 'claude',
     updatedAt: 0,
   };
 }
@@ -174,7 +175,9 @@ function render() {
   renderPeople();
   renderSettings();
   $('#reviewPeriod').textContent = periodLabel(currentPeriod());
-  $('#aiHint').textContent = 'Görüntü ücretsiz olarak bu cihazda okunur, hiçbir yere gönderilmez. Kaydetmeden önce sayıları kontrol et.';
+  $('#aiHint').textContent = engine() !== 'ocr' && aiReady()
+    ? `Görüntüler ${AI[engine()].label} yapay zekâsıyla okunur. Kaydetmeden önce sayıları görüntüyle karşılaştır.`
+    : 'Şu an basit OCR ile okunuyor (zayıf). Daha doğru okuma için Ayarlar → Ekran görüntüsü okuma bölümünden Claude ya da ücretsiz Gemini anahtarı gir.';
 }
 
 /* ---------- Dönem listesi ---------- */
@@ -385,7 +388,13 @@ function renderSettings() {
       <button class="danger" data-del>Sil</button>
     </div>`).join('') || '<p class="muted small">Gider yok.</p>';
   const active = document.activeElement;
-  for (const id of ['company', 'footerNote']) if (active !== $('#' + id)) $('#' + id).value = state[id] || '';
+  for (const id of ['company', 'footerNote', 'claudeKey', 'claudeModel', 'geminiKey', 'geminiModel']) {
+    if (active !== $('#' + id)) $('#' + id).value = state[id] || '';
+  }
+  $('#claudeModel').placeholder = AI.claude.model;
+  $('#geminiModel').placeholder = AI.gemini.model;
+  $('#aiEngine').value = engine();
+  for (const el of document.querySelectorAll('[data-engine]')) el.hidden = el.dataset.engine !== engine();
 }
 
 function bindList(sel, arr) {
@@ -409,7 +418,35 @@ bindList('#catList', 'categories');
 bindList('#expList', 'expenses');
 $('#addCat').onclick = () => { state.categories.push({ id: uid(), name: 'Yeni kategori', price: 0 }); save(); render(); };
 $('#addExp').onclick = () => { state.expenses.push({ id: uid(), name: 'Gider', rate: 0, mode: 'deduct', enabled: true }); save(); render(); };
-for (const id of ['company', 'footerNote']) $('#' + id).onchange = e => { state[id] = e.target.value.trim(); save(); render(); };
+for (const id of ['company', 'footerNote', 'claudeKey', 'claudeModel', 'geminiKey', 'geminiModel', 'aiEngine']) {
+  $('#' + id).onchange = e => { state[id] = e.target.value.trim(); save(); render(); };
+}
+$('#aiTest').onclick = async () => {
+  if (engine() === 'ocr') { toast('Basit OCR seçili, anahtar gerekmiyor'); return; }
+  if (!aiReady()) { toast('Önce anahtarı gir'); return; }
+  const btn = $('#aiTest');
+  btn.disabled = true; btn.textContent = 'Deneniyor…';
+  try {
+    // Küçük bir test görüntüsü: tek kurye, bilinen sayılar
+    const cv = document.createElement('canvas');
+    cv.width = 420; cv.height = 150;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+    g.fillStyle = '#111'; g.font = '20px Arial';
+    g.fillText('Test Kurye', 16, 32);
+    g.fillText(`${state.categories[0]?.name || 'Tekli'}: 7`, 16, 72);
+    g.fillText(`${state.categories[1]?.name || 'Çiftli'}: 13`, 16, 108);
+    const b64 = cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+    const text = engine() === 'gemini' ? await readWithGemini(b64) : await readWithClaude(b64);
+    const f = parseAiJson(text)[0];
+    const ok = f && f.counts[state.categories[0].id] === 7 && f.counts[state.categories[1].id] === 13;
+    toast(ok ? `✓ ${AI[engine()].label} bağlı ve doğru okuyor` : `Bağlandı ama test sonucu beklenenden farklı: ${text.slice(0, 120)}`, 6000);
+  } catch (e) {
+    toast('Bağlantı hatası: ' + e.message, 8000);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Bağlantıyı test et';
+  }
+};
 
 $('#exportBtn').onclick = () => {
   const a = document.createElement('a');
@@ -816,7 +853,8 @@ async function applyFixes(fixes, worker, canvas) {
   }
 }
 
-async function readScreenshot(file, onProgress) {
+async function readWithOcr(file, onProgress) {
+  if (!window.Tesseract) throw new Error('OCR modülü yüklenemedi, internet bağlantını kontrol et');
   const canvas = await prepareImage(file);
   const worker = await getWorker(onProgress);
   const { data } = await worker.recognize(canvas, {}, { blocks: true, text: true });
@@ -825,31 +863,145 @@ async function readScreenshot(file, onProgress) {
   return { found, text: data.text };
 }
 
+/* ---------- Yapay zekâ ile okuma (Claude / Gemini) ---------- */
+
+const AI = {
+  claude: { label: 'Claude', keyField: 'claudeKey', modelField: 'claudeModel', model: 'claude-sonnet-5-5' },
+  gemini: { label: 'Gemini', keyField: 'geminiKey', modelField: 'geminiModel', model: 'gemini-2.5-flash' },
+};
+const engine = () => state.aiEngine || 'claude';
+const aiReady = () => AI[engine()] && !!state[AI[engine()].keyField];
+
+// Görüntüyü yapay zekâya göndermek için JPEG'e çevirir (küçük rakamlar bozulmasın diye yüksek kalite)
+function imageToBase64(file, max = 2000) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      const g = cv.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+      g.drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(img.src);
+      resolve(cv.toDataURL('image/jpeg', 0.92).split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('görüntü açılamadı'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function aiPrompt() {
+  const cats = state.categories.map(c => `- "${c.id}": ${c.name} (ekranda şöyle geçebilir: ${c.keys ?? DEFAULT_KEYS[c.id] ?? c.name})`).join('\n');
+  const people = state.people.map(p => p.name).join(', ');
+  return `Bu ekran görüntüsü bir depodaki kuryelerin paket sayılarını gösteriyor. Görüntüde bir ya da birden fazla kurye olabilir.
+Her kurye için adını ve aşağıdaki kategorilerdeki paket ADETLERİNİ çıkar.
+
+Kategoriler (anahtar: açıklama):
+${cats}
+
+Kurallar:
+- "Tekli" = "ilk paket", "çiftli" = "birleşen paket".
+- Sadece ADET yaz. Para tutarlarını (₺, TL, kuruşlu sayılar) ve toplam satırlarını kategori sayısı olarak YAZMA.
+- Görüntüde olmayan kategori için 0 yaz. Rakamları dikkatle oku; 1 ile 7, 3 ile 8, 0 ile 6 karışmasın.
+- İsmi görüntüde yazdığı gibi, Türkçe karakterleriyle yaz.${people ? `\n- Bilinen kuryeler: ${people}. Görüntüdeki isim bunlardan birine benziyorsa bu yazılışı kullan.` : ''}
+- Görüntüde kurye bilgisi yoksa "couriers" boş liste olsun.
+
+Sadece şu biçimde geçerli JSON döndür, başka hiçbir şey yazma:
+{"couriers":[{"name":"Ad Soyad","counts":{${state.categories.map(c => `"${c.id}":0`).join(',')}}}]}`;
+}
+
+function parseAiJson(text) {
+  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+  if (!json) throw new Error('yapay zekâ cevabı anlaşılamadı');
+  const parsed = JSON.parse(json);
+  return (parsed.couriers || []).map(c => ({
+    name: String(c.name || '').trim(),
+    counts: Object.fromEntries(state.categories.map(cat => [cat.id, Math.max(0, Math.round(num(c.counts?.[cat.id])))])),
+  }));
+}
+
+async function readWithClaude(b64) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': state.claudeKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: state.claudeModel || AI.claude.model,
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+          { type: 'text', text: aiPrompt() },
+        ],
+      }],
+    }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Claude: ' + (body.error?.message || r.status));
+  return (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+}
+
+async function readWithGemini(b64) {
+  const model = state.geminiModel || AI.gemini.model;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': state.geminiKey },
+    body: JSON.stringify({
+      contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: aiPrompt() }] }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+    }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Gemini: ' + (body.error?.message || r.status));
+  return (body.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
+}
+
+async function readScreenshot(file, onProgress) {
+  if (engine() !== 'ocr' && aiReady()) {
+    onProgress({ status: 'ai' });
+    const b64 = await imageToBase64(file);
+    const text = engine() === 'gemini' ? await readWithGemini(b64) : await readWithClaude(b64);
+    return { found: parseAiJson(text), text, via: AI[engine()].label };
+  }
+  return { ...(await readWithOcr(file, onProgress)), via: 'OCR' };
+}
+
 let pending = []; // { name, counts, personId }
 let ocrQueue = Promise.resolve();
 
 function handleFiles(files) {
   files = files.filter(f => f.type.startsWith('image/'));
   if (!files.length) return;
-  if (!window.Tesseract) { toast('Okuma modülü yüklenemedi, internet bağlantını kontrol et'); return; }
+  if (engine() !== 'ocr' && !aiReady()) {
+    toast(`${AI[engine()].label} anahtarı girilmemiş — şimdilik basit OCR ile okunuyor. Ayarlar’dan anahtar ekle.`, 6000);
+  }
   const queue = $('#shotQueue');
   for (const file of files) {
+    const imgUrl = URL.createObjectURL(file);
     const item = document.createElement('div');
     item.className = 'qitem';
     item.innerHTML = `<img alt=""><div class="qbody"><span class="st">Sırada…</span></div>`;
-    item.querySelector('img').src = URL.createObjectURL(file);
+    item.querySelector('img').src = imgUrl;
     queue.prepend(item);
     const st = item.querySelector('.st');
-    // OCR tek işçide sırayla çalışır
+    // Görüntüler sırayla okunur
     ocrQueue = ocrQueue.then(async () => {
       try {
-        const { found, text } = await readScreenshot(file, m => {
-          if (m.status === 'recognizing text') st.textContent = `Okunuyor… %${Math.round(m.progress * 100)}`;
+        const { found, text, via } = await readScreenshot(file, m => {
+          if (m.status === 'ai') st.textContent = `${AI[engine()].label} okuyor…`;
+          else if (m.status === 'recognizing text') st.textContent = `Okunuyor… %${Math.round(m.progress * 100)}`;
           else st.textContent = 'Okuma modülü hazırlanıyor (ilk seferde biraz sürer)…';
         });
         st.textContent = found.length
-          ? `${found.length} kişi okundu: ${found.map(f => f.name || '(isim yok)').join(', ')}`
-          : 'Paket sayısı bulunamadı — okunan metne bak';
+          ? `${via} · ${found.length} kişi okundu: ${found.map(f => f.name || '(isim yok)').join(', ')}`
+          : `${via} · paket sayısı bulunamadı — okunan metne bak`;
         item.querySelector('.qbody').insertAdjacentHTML('beforeend',
           `<details><summary class="small muted">Okunan metin</summary><pre class="ocr">${esc(text)}</pre></details>`);
         for (const f of found) {
@@ -857,7 +1009,7 @@ function handleFiles(files) {
           // Aynı kişi birden fazla görüntüde varsa topla
           const same = pending.find(x => (p && x.personId === p.id) || (f.name && norm(x.name) === norm(f.name)));
           if (same) { for (const c of state.categories) same.counts[c.id] += f.counts[c.id]; }
-          else pending.push({ key: uid(), name: f.name || 'İsim okunamadı', counts: f.counts, personId: p?.id || '' });
+          else pending.push({ key: uid(), name: f.name || 'İsim okunamadı', counts: f.counts, personId: p?.id || '', img: imgUrl });
         }
       } catch (err) {
         st.innerHTML = `<span class="err">Okunamadı: ${esc(err.message || err)}</span>`;
@@ -875,6 +1027,7 @@ function renderReview() {
   $('#reviewRows').innerHTML = pending.map(r => `
     <div class="rrow ${r.personId ? '' : 'unmatched'}" data-key="${r.key}">
       <div class="row gap">
+        ${r.img ? `<img class="rthumb" src="${r.img}" alt="Ekran görüntüsü" data-f="zoom" title="Büyüt">` : ''}
         <strong style="flex:1 1 140px">${esc(r.name)}</strong>
         <select data-f="person" style="flex:1 1 180px;width:auto">${opts(r.personId)}</select>
         ${r.personId ? '' : '<button class="secondary" data-f="new">Yeni kişi olarak ekle</button>'}
@@ -892,6 +1045,7 @@ $('#reviewRows').addEventListener('change', e => {
 });
 $('#reviewRows').addEventListener('click', e => {
   const f = e.target.dataset.f;
+  if (f === 'zoom') { openModal(`<img src="${e.target.src}" alt="Ekran görüntüsü"><div class="row end" style="margin-top:12px"><button value="close">Kapat</button></div>`); return; }
   if (!f || e.target.tagName !== 'BUTTON') return;
   const row = pending.find(r => r.key === e.target.closest('[data-key]').dataset.key);
   if (f === 'drop') { pending = pending.filter(r => r !== row); renderReview(); }

@@ -244,6 +244,7 @@ main { max-width: 960px; margin: 0 auto; padding: 16px; }
 }
 .setrow [data-f=keys] { font-size: 13px; color: var(--muted); }
 .qbody { flex: 1; min-width: 0; }
+.rthumb { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); cursor: zoom-in; flex: none; }
 pre.ocr { white-space: pre-wrap; font-size: 12px; max-height: 220px; overflow: auto; background: var(--bg); padding: 8px; border-radius: 8px; margin: 6px 0 0; }
 
 dialog {

@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -119,6 +119,30 @@
       </div>
 
       <div class="card">
+        <h2>Ekran görüntüsü okuma</h2>
+        <label>Okuyucu
+          <select id="aiEngine">
+            <option value="claude">Claude (en doğru · kullandıkça çok az ücret)</option>
+            <option value="gemini">Google Gemini (ücretsiz anahtar)</option>
+            <option value="ocr">Basit OCR (ücretsiz · zayıf)</option>
+          </select>
+        </label>
+        <div data-engine="claude">
+          <p class="muted small">console.anthropic.com → API Keys → Create Key. Bir ekran görüntüsü yaklaşık 1–2 kuruş tutar.</p>
+          <label>Claude API anahtarı<input id="claudeKey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+          <label>Model<input id="claudeModel"></label>
+        </div>
+        <div data-engine="gemini">
+          <p class="muted small">aistudio.google.com → Get API key → Create API key. Google hesabıyla ücretsiz; günlük kullanım sınırı var.</p>
+          <label>Gemini API anahtarı<input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…"></label>
+          <label>Model<input id="geminiModel"></label>
+        </div>
+        <div data-engine="ocr"><p class="muted small">Anahtar gerektirmez ama küçük ve tek haneli sayılarda hata yapabilir.</p></div>
+        <p class="muted small">Anahtar hesabında saklanır; giriş yapan her cihazda çalışır.</p>
+        <button class="secondary" id="aiTest" type="button">Bağlantıyı test et</button>
+      </div>
+
+      <div class="card">
         <h2>Fatura görseli</h2>
         <label>Firma / başlık<input id="company" placeholder="Örn. Depo Adı"></label>
         <label>Alt not<input id="footerNote" placeholder="Örn. Lütfen bu tutara fatura kesiniz."></label>
@@ -143,7 +167,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="config.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
