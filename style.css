@@ -285,3 +285,4 @@ a.button { text-decoration: none; }
 .sendlist { overflow-x: hidden; }
 .sendrow > button, .sendrow > .button { flex: none; padding: 8px 12px; }
 .sendrow a.button svg { pointer-events: none; }
+input.secret { -webkit-text-security: disc; font-family: monospace; }

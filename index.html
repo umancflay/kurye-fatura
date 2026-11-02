@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -65,7 +65,7 @@
     <section id="tab-donem" class="tab active">
       <div class="summary" id="summary"></div>
       <div class="toolbar">
-        <input type="search" id="search" placeholder="Kişi ara…">
+        <input type="search" id="search" name="kurye-ara" autocomplete="off" placeholder="Kişi ara…">
         <button id="saveAll" class="secondary">Hepsini indir</button>
         <button id="bulkSend" class="wa"><svg><use href="#i-wa"/></svg>Gönder</button>
       </div>
@@ -95,7 +95,7 @@
     <!-- KİŞİLER -->
     <section id="tab-kisiler" class="tab">
       <div class="toolbar">
-        <input type="search" id="personSearch" placeholder="Kişi ara…">
+        <input type="search" id="personSearch" name="kisi-ara" autocomplete="off" placeholder="Kişi ara…">
         <button id="addPerson">+ Kişi ekle</button>
       </div>
       <div id="personList" class="list"></div>
@@ -132,11 +132,11 @@
           </select>
         </label>
         <div data-engine="claude">
-          <label>Claude API anahtarı<input id="claudeKey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+          <label>Claude API anahtarı<input id="claudeKey" class="secret" type="text" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
           <label>Model<input id="claudeModel"></label>
         </div>
         <div data-engine="gemini">
-          <label>Gemini API anahtarı<input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…"></label>
+          <label>Gemini API anahtarı<input id="geminiKey" class="secret" type="text" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>
           <label>Model<input id="geminiModel"></label>
         </div>
         <div data-engine="ocr"></div>
@@ -168,7 +168,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="config.js?v=14"></script>
-<script src="app.js?v=14"></script>
+<script src="config.js?v=15"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

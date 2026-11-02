@@ -240,8 +240,16 @@ function render() {
 
 /* ---------- Dönem listesi ---------- */
 
+// Tarayıcının arama kutusuna kendiliğinden doldurduğu e-postayı yok say
+function searchText(sel) {
+  const el = $(sel);
+  if (el.value.includes('@')) el.value = '';
+  return norm(el.value);
+}
+const catName = id => state.categories.find(c => c.id === id)?.name || id;
+
 function renderPeriod() {
-  const q = norm($('#search').value);
+  const q = searchText('#search');
   const recs = state.records[currentPeriod()] || {};
   let gross = 0, net = 0, pk = 0, sent = 0, count = 0;
   const withRec = [], without = [];
@@ -269,7 +277,7 @@ function renderPeriod() {
         <button class="secondary" data-act="edit" data-id="${p.id}">Elle gir</button></div></div>`;
     }
     const c = calc(p, rec);
-    const chips = c.lines.filter(l => l.count).map(l => `<span class="chip">${esc(l.name)} <b>${l.count}</b></span>`).join('');
+    const chips = c.lines.filter(l => l.count).map(l => `<span class="chip">${esc(l.bonus ? catName(l.id) : l.name)} <b>${l.count}</b></span>`).join('');
     const sentBadge = rec.sentAt
       ? `<span class="badge ok">✓ gönderildi ${new Date(rec.sentAt).toLocaleDateString('tr-TR')}</span>`
       : `<span class="badge">gönderilmedi</span>`;
@@ -347,7 +355,7 @@ function closeModal() { const d = $('#modal'); d.onclose = null; d.close(); }
 /* ---------- Kişiler ---------- */
 
 function renderPeople() {
-  const q = norm($('#personSearch').value);
+  const q = searchText('#personSearch');
   const list = state.people
     .filter(p => !q || norm(p.name).includes(q))
     .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
