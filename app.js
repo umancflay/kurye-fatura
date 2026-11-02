@@ -579,29 +579,79 @@ function getWorker(onProgress) {
   return ocrWorker;
 }
 
-// OCR için görüntüyü hazırlar: küçükse büyütür, griye çevirir, koyu temaysa tersine çevirir.
+/* OCR için görüntüyü hazırlar:
+   - küçükse büyütür, griye çevirir, koyu temaysa tersine çevirir
+   - bölgesel eşikleme: renkli hücrelerdeki yazı da (örn. kırmızı zemin) siyah-beyaz netleşir
+   - Excel/tablo çizgilerini siler; çizgiler OCR'ın sayıları atlamasına yol açıyor */
 function prepareImage(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const scale = Math.max(1, Math.min(3, 2000 / img.width));
       const cv = document.createElement('canvas');
-      cv.width = Math.round(img.width * scale);
-      cv.height = Math.round(img.height * scale);
+      const W = cv.width = Math.round(img.width * scale);
+      const H = cv.height = Math.round(img.height * scale);
       const g = cv.getContext('2d', { willReadFrequently: true });
       g.imageSmoothingQuality = 'high';
-      g.drawImage(img, 0, 0, cv.width, cv.height);
+      g.drawImage(img, 0, 0, W, H);
       URL.revokeObjectURL(img.src);
-      const d = g.getImageData(0, 0, cv.width, cv.height);
+      const d = g.getImageData(0, 0, W, H);
       const px = d.data;
+      const N = W * H;
+      const lum = new Float32Array(N);
       let sum = 0;
-      for (let i = 0; i < px.length; i += 4) {
-        const l = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-        px[i] = px[i + 1] = px[i + 2] = l;
-        sum += l;
+      for (let i = 0; i < N; i++) {
+        lum[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+        sum += lum[i];
       }
-      if (sum / (px.length / 4) < 120) {
-        for (let i = 0; i < px.length; i += 4) px[i] = px[i + 1] = px[i + 2] = 255 - px[i];
+      if (sum / N < 120) for (let i = 0; i < N; i++) lum[i] = 255 - lum[i];
+
+      // Bölgesel eşik: piksel çevresinin ortalamasından belirgin koyuysa yazıdır
+      const iw = W + 1;
+      const integral = new Float64Array(iw * (H + 1));
+      for (let y = 0; y < H; y++) {
+        let row = 0;
+        for (let x = 0; x < W; x++) {
+          row += lum[y * W + x];
+          integral[(y + 1) * iw + x + 1] = integral[y * iw + x + 1] + row;
+        }
+      }
+      const R = 25, C = 12;
+      const dark = new Uint8Array(N);
+      for (let y = 0; y < H; y++) {
+        const y0 = Math.max(0, y - R), y1 = Math.min(H, y + R + 1);
+        for (let x = 0; x < W; x++) {
+          const x0 = Math.max(0, x - R), x1 = Math.min(W, x + R + 1);
+          const s = integral[y1 * iw + x1] - integral[y0 * iw + x1] - integral[y1 * iw + x0] + integral[y0 * iw + x0];
+          const mean = s / ((x1 - x0) * (y1 - y0));
+          dark[y * W + x] = lum[y * W + x] < mean - C ? 1 : 0;
+        }
+      }
+
+      // Uzun dikey ve yatay çizgileri sil (önce dikey: yatay çizgiler onları bölmeden)
+      const minV = 140, minH = 160;
+      for (let x = 0; x < W; x++) {
+        for (let y = 0; y < H;) {
+          if (!dark[y * W + x]) { y++; continue; }
+          let e = y;
+          while (e < H && dark[e * W + x]) e++;
+          if (e - y >= minV) for (let k = y; k < e; k++) dark[k * W + x] = 2;
+          y = e;
+        }
+      }
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W;) {
+          if (!dark[y * W + x]) { x++; continue; }
+          let e = x;
+          while (e < W && dark[y * W + e]) e++;
+          if (e - x >= minH) for (let k = x; k < e; k++) dark[y * W + k] = 2;
+          x = e;
+        }
+      }
+      for (let i = 0; i < N; i++) {
+        const v = dark[i] === 1 ? 0 : 255;
+        px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v;
+        px[i * 4 + 3] = 255;
       }
       g.putImageData(d, 0, 0);
       resolve(cv);
@@ -818,7 +868,12 @@ async function parseLayout(data, canvas, worker) {
       const k = findKeyWords(l.words, c);
       if (!k || counts[c.id]) continue;
       foundAny = true;
-      const w = l.words.slice(k.end).find(w => wordValue(w.t) != null);
+      // Aynı hizadaki sayı: OCR sağdaki hücreyi ayrı satır sayabilir, o yüzden tüm kelimelere bak
+      const mid = (l.y0 + l.y1) / 2;
+      const w = l.words.slice(k.end).find(w => wordValue(w.t) != null) || lines
+        .flatMap(x => x.words)
+        .filter(w => w.x0 > k.last.x1 && w.y0 < mid && w.y1 > mid && wordValue(w.t) != null)
+        .sort((a, b) => a.x0 - b.x0)[0];
       if (w) { counts[c.id] = wordValue(w.t); verifySmall(fixes, counts, c.id, w); return; }
       const next = lines[i + 1];
       const nextVal = next && !state.categories.some(cc => findKeyWords(next.words, cc))
