@@ -3,7 +3,6 @@
 /* ---------- Durum ve saklama ---------- */
 
 const STORE_KEY = 'kuryeFatura.v1'; // çevrimdışı önbellek; asıl kayıt Supabase'te
-const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const CFG = window.KURYE_CONFIG || {};
 const sb = CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase
   ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey)
@@ -25,8 +24,6 @@ function defaultState() {
     records: {},
     company: '',
     footerNote: 'Lütfen bu tutara fatura kesiniz.',
-    apiKey: '',
-    model: DEFAULT_MODEL,
     updatedAt: 0,
   };
 }
@@ -177,9 +174,7 @@ function render() {
   renderPeople();
   renderSettings();
   $('#reviewPeriod').textContent = periodLabel(currentPeriod());
-  $('#aiHint').textContent = state.apiKey
-    ? 'Görüntüdeki isimler ve paket sayıları otomatik okunur, kişilerle eşleştirilir.'
-    : 'Önce Ayarlar → “Ekran görüntüsü okuma” bölümüne Claude API anahtarını gir.';
+  $('#aiHint').textContent = 'Görüntü ücretsiz olarak bu cihazda okunur, hiçbir yere gönderilmez. Kaydetmeden önce sayıları kontrol et.';
 }
 
 /* ---------- Dönem listesi ---------- */
@@ -373,6 +368,7 @@ function renderSettings() {
   $('#catList').innerHTML = state.categories.map(c => `
     <div class="setrow" data-id="${c.id}">
       <input data-f="name" value="${esc(c.name)}" aria-label="Kategori adı">
+      <input data-f="keys" value="${esc(c.keys ?? DEFAULT_KEYS[c.id] ?? c.name)}" aria-label="Ekran görüntüsündeki adları" title="Ekran görüntüsünde bu kategori hangi adlarla yazıyor (virgülle)">
       <input data-f="price" type="number" step="0.01" inputmode="decimal" value="${c.price}" aria-label="Fiyat">
       <span class="muted small">₺ / paket</span>
       <button class="danger" data-del>Sil</button>
@@ -389,7 +385,7 @@ function renderSettings() {
       <button class="danger" data-del>Sil</button>
     </div>`).join('') || '<p class="muted small">Gider yok.</p>';
   const active = document.activeElement;
-  for (const id of ['company', 'footerNote', 'apiKey', 'model']) if (active !== $('#' + id)) $('#' + id).value = state[id] || '';
+  for (const id of ['company', 'footerNote']) if (active !== $('#' + id)) $('#' + id).value = state[id] || '';
 }
 
 function bindList(sel, arr) {
@@ -413,7 +409,7 @@ bindList('#catList', 'categories');
 bindList('#expList', 'expenses');
 $('#addCat').onclick = () => { state.categories.push({ id: uid(), name: 'Yeni kategori', price: 0 }); save(); render(); };
 $('#addExp').onclick = () => { state.expenses.push({ id: uid(), name: 'Gider', rate: 0, mode: 'deduct', enabled: true }); save(); render(); };
-for (const id of ['company', 'footerNote', 'apiKey', 'model']) $('#' + id).onchange = e => { state[id] = e.target.value.trim(); save(); render(); };
+for (const id of ['company', 'footerNote']) $('#' + id).onchange = e => { state[id] = e.target.value.trim(); save(); render(); };
 
 $('#exportBtn').onclick = () => {
   const a = document.createElement('a');
@@ -534,103 +530,341 @@ document.addEventListener('paste', e => {
   handleFiles(files);
 });
 
-// Büyük görüntüleri küçültüp base64 JPEG yapar (API maliyeti ve hız için).
-function imageToBase64(file, max = 1800) {
+/* Ücretsiz okuma: Tesseract OCR tarayıcının içinde çalışır, görüntü hiçbir yere gönderilmez.
+   İlk kullanımda Türkçe dil dosyası (~5 MB) indirilir, sonra önbellekten gelir. */
+
+let ocrWorker = null;
+let ocrLogger = null;
+function getWorker(onProgress) {
+  ocrLogger = onProgress;
+  ocrWorker ??= Tesseract.createWorker('tur', 1, { logger: m => ocrLogger && ocrLogger(m) })
+    .catch(e => { ocrWorker = null; throw e; });
+  return ocrWorker;
+}
+
+// OCR için görüntüyü hazırlar: küçükse büyütür, griye çevirir, koyu temaysa tersine çevirir.
+function prepareImage(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const scale = Math.max(1, Math.min(3, 2000 / img.width));
       const cv = document.createElement('canvas');
       cv.width = Math.round(img.width * scale);
       cv.height = Math.round(img.height * scale);
-      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, cv.width, cv.height);
       URL.revokeObjectURL(img.src);
-      resolve(cv.toDataURL('image/jpeg', 0.9).split(',')[1]);
+      const d = g.getImageData(0, 0, cv.width, cv.height);
+      const px = d.data;
+      let sum = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        const l = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        px[i] = px[i + 1] = px[i + 2] = l;
+        sum += l;
+      }
+      if (sum / (px.length / 4) < 120) {
+        for (let i = 0; i < px.length; i += 4) px[i] = px[i + 1] = px[i + 2] = 255 - px[i];
+      }
+      g.putImageData(d, 0, 0);
+      resolve(cv);
     };
     img.onerror = () => reject(new Error('görüntü açılamadı'));
     img.src = URL.createObjectURL(file);
   });
 }
 
-function buildPrompt() {
-  const cats = state.categories.map(c => `- "${c.id}": ${c.name}`).join('\n');
-  return `Bu ekran görüntüsü bir depodaki kuryelerin aylık paket sayılarını gösteriyor.
-Görüntüdeki HER kurye için adını ve aşağıdaki kategorilerdeki paket ADETLERİNİ çıkar.
+const DEFAULT_KEYS = {
+  tekli: 'tekli, ilk paket, ilk',
+  ciftli: 'çiftli, birleşen, birlesen, birleşik',
+  finans: 'finans',
+  carsi: 'çarşı, carsi',
+  yemek: 'yemek',
+};
+const catKeys = c => String(c.keys ?? DEFAULT_KEYS[c.id] ?? c.name)
+  .split(',').map(norm).filter(Boolean).sort((a, b) => b.length - a.length);
 
-Kategoriler (anahtar: açıklama):
-${cats}
-
-Kurallar:
-- "Tekli" ile "ilk paket" aynı şeydir; "çiftli" ile "birleşen paket" aynı şeydir.
-- Sadece ADET (sayı) yaz, para tutarı yazma. Görüntüde olmayan kategori için 0 yaz.
-- Kategori görüntüde farklı adla geçiyorsa en yakın kategoriye eşleştir.
-- İsimleri görüntüde yazdığı gibi, Türkçe karakterleriyle yaz.
-- Görüntüde kurye satırı yoksa "couriers" boş liste olsun.
-
-Sadece şu biçimde geçerli JSON döndür, başka hiçbir şey yazma:
-{"couriers":[{"name":"Ad Soyad","counts":{${state.categories.map(c => `"${c.id}":0`).join(',')}}}]}`;
+// Bir satırdaki adetleri bulur; para tutarlarını (₺, TL, kuruşlu) atlar.
+function lineNumbers(line) {
+  const out = [];
+  const re = /(₺\s*)?(\d{1,3}(?:\.\d{3})+|\d+)(,\d{1,2})?(\s*(?:₺|tl\b))?/gi;
+  let m;
+  while ((m = re.exec(line))) {
+    if (m[1] || m[3] || m[4]) continue;
+    out.push({ value: parseInt(m[2].replace(/\./g, ''), 10), index: m.index });
+  }
+  return out;
 }
 
-async function readScreenshot(file) {
-  const data = await imageToBase64(file);
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': state.apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: state.model || DEFAULT_MODEL,
-      max_tokens: 4000,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
-          { type: 'text', text: buildPrompt() },
-        ],
-      }],
-    }),
+// Metinde geçen ilk kategoriyi bulur
+function findCategory(textNorm) {
+  let best = null;
+  for (const c of state.categories) {
+    for (const k of catKeys(c)) {
+      const i = textNorm.indexOf(k);
+      if (i >= 0) {
+        if (!best || i < best.index) best = { cat: c, index: i, key: k };
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+function looksLikeName(line) {
+  const words = line.replace(/[^\p{L}\s]/gu, ' ').trim().split(/\s+/).filter(w => w.length > 1);
+  if (words.length < 2 || words.length > 4 || /\d/.test(line)) return false;
+  if (findCategory(norm(line))) return false;
+  return words.every(w => w[0] === w[0].toLocaleUpperCase('tr'));
+}
+
+function detectName(lines) {
+  // Önce kayıtlı kişilerden biri metinde geçiyor mu bak
+  let best = null, score = 0;
+  for (const l of lines) {
+    const t = l.replace(/[\d:|]/g, ' ').trim();
+    for (const p of state.people) {
+      for (const cand of [p.name, ...(p.aliases || [])]) {
+        const s = norm(t).includes(norm(cand)) ? 1 : similarity(t, cand);
+        if (s > score) { score = s; best = p.name; }
+      }
+    }
+  }
+  if (score >= 0.72) return best;
+  return lines.find(looksLikeName)?.replace(/\s+/g, ' ').trim() || '';
+}
+
+function parseOcr(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const emptyCounts = () => Object.fromEntries(state.categories.map(c => [c.id, 0]));
+
+  // Tablo düzeni: başlık satırında kategoriler yan yana, altında "Ad Soyad 12 3 4 ..."
+  const header = lines.find(l => {
+    const n = norm(l);
+    return state.categories.filter(c => catKeys(c).some(k => n.includes(k))).length >= 2;
   });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error?.message || `API ${r.status}`);
-  const text = (body.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  const parsed = JSON.parse(json);
-  return (parsed.couriers || []).filter(c => c.name);
+  const rows = lines.filter(l => {
+    const words = l.replace(/[^\p{L}\s]/gu, ' ').trim().split(/\s+/).filter(w => w.length > 1);
+    return lineNumbers(l).length >= 2 && words.length >= 2 && !findCategory(norm(l));
+  });
+  if (rows.length && (header || rows.length >= 2)) {
+    let order = state.categories;
+    if (header) {
+      const n = norm(header);
+      order = state.categories
+        .map(c => ({ c, i: Math.min(...catKeys(c).map(k => { const i = n.indexOf(k); return i < 0 ? Infinity : i; })) }))
+        .filter(x => x.i < Infinity).sort((a, b) => a.i - b.i).map(x => x.c);
+    }
+    return rows.map(l => {
+      let nums = lineNumbers(l).map(x => x.value);
+      // Fazla sayı varsa: sondaki toplamı ya da baştaki sıra numarasını at
+      if (nums.length > order.length) {
+        const sumHead = nums.slice(0, -1).reduce((a, b) => a + b, 0);
+        if (nums.length === order.length + 1 && nums[nums.length - 1] === sumHead) nums = nums.slice(0, -1);
+        else nums = nums.slice(nums.length - order.length);
+      }
+      const counts = emptyCounts();
+      order.forEach((c, i) => { counts[c.id] = nums[i] ?? 0; });
+      const name = l.replace(/[^\p{L}\s]+/gu, ' ').replace(/\s+/g, ' ').trim();
+      return { name, counts };
+    });
+  }
+
+  // Kart düzeni: tek kişi; "İlk Paket: 120", "Birleşen Paket  30" gibi satırlar
+  const counts = emptyCounts();
+  let foundAny = false;
+  lines.forEach((l, i) => {
+    const hit = findCategory(norm(l));
+    if (!hit || counts[hit.cat.id]) return;
+    // Kategori adından sonraki ilk sayı; yoksa alt satırdaki ilk sayı
+    const after = lineNumbers(l).filter(x => norm(l.slice(0, x.index)).length >= hit.index + hit.key.length);
+    const next = lines[i + 1] || '';
+    const val = after[0]?.value ?? (findCategory(norm(next)) ? undefined : lineNumbers(next)[0]?.value);
+    if (val != null) { counts[hit.cat.id] = val; foundAny = true; }
+  });
+  if (!foundAny) return [];
+  return [{ name: detectName(lines), counts }];
+}
+
+/* Konuma dayalı okuma: sayıları ekrandaki yerine göre sütunlara/etiketlere bağlar.
+   Okunamayan hücre (genelde tek haneli sayılar) sadece rakam modunda yeniden okunur. */
+
+const wordValue = t => {
+  if (/^[-–—_.]+$/.test(t)) return null;
+  const n = lineNumbers(t);
+  return n.length === 1 && t.replace(/[^\d]/g, '').length >= String(n[0].value).length ? n[0].value : null;
+};
+
+async function readDigits(worker, canvas, box) {
+  // Hücredeki koyu piksellerin sınırını bul, rakamı sıkı kırpıp büyüt (tek haneliler için önemli)
+  const bx0 = Math.max(0, box.x0), by0 = Math.max(0, box.y0);
+  const bw = Math.min(canvas.width, box.x1) - bx0, bh = Math.min(canvas.height, box.y1) - by0;
+  if (bw < 2 || bh < 2) return null;
+  const px = canvas.getContext('2d', { willReadFrequently: true }).getImageData(bx0, by0, bw, bh).data;
+  let x0 = bw, y0 = bh, x1 = -1, y1 = -1;
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+    if (px[(y * bw + x) * 4] < 140) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return null; // hücre boş
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const scale = Math.max(1, 64 / h);
+  const pad = Math.round(32 * scale / 2);
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(w * scale) + pad * 2; cv.height = Math.round(h * scale) + pad * 2;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(canvas, bx0 + x0, by0 + y0, w, h, pad, pad, Math.round(w * scale), Math.round(h * scale));
+  const { data } = await worker.recognize(cv);
+  const digits = data.text.replace(/\D/g, '');
+  return digits ? parseInt(digits, 10) : null;
+}
+
+// Kategori anahtarının satırdaki kelime aralığını bulur ("ilk paket" iki kelime olabilir)
+function findKeyWords(words, cat) {
+  const wn = words.map(w => norm(w.t));
+  for (const key of catKeys(cat)) {
+    const toks = key.split(' ');
+    for (let i = 0; i + toks.length <= wn.length; i++) {
+      if (toks.every((t, j) => wn[i + j] === t || (t.length >= 4 && wn[i + j].startsWith(t)))) {
+        return { first: words[i], last: words[i + toks.length - 1], end: i + toks.length };
+      }
+    }
+  }
+  return null;
+}
+
+async function parseLayout(data, canvas, worker) {
+  const lines = (data.lines || []).map(l => ({
+    text: l.text.trim(),
+    y0: l.bbox.y0, y1: l.bbox.y1,
+    words: l.words.map(w => ({ t: w.text, ...w.bbox, cx: (w.bbox.x0 + w.bbox.x1) / 2 })),
+  })).filter(l => l.words.length);
+  const emptyCounts = () => Object.fromEntries(state.categories.map(c => [c.id, 0]));
+  const fixes = []; // rakam modunda yeniden okunacak hücreler
+
+  // Tablo: kategorilerin en az ikisi aynı başlık satırında
+  const header = lines.find(l => state.categories.filter(c => findKeyWords(l.words, c)).length >= 2);
+  if (header) {
+    const cols = state.categories.map(c => {
+      const k = findKeyWords(header.words, c);
+      return k && { cat: c, x0: k.first.x0, x1: k.last.x1, cx: (k.first.x0 + k.last.x1) / 2 };
+    }).filter(Boolean).sort((a, b) => a.cx - b.cx);
+    cols.forEach((c, i) => {
+      c.lo = i ? (cols[i - 1].cx + c.cx) / 2 : c.x0 - (c.x1 - c.x0);
+      c.hi = i < cols.length - 1 ? (c.cx + cols[i + 1].cx) / 2 : c.x1 + (c.x1 - c.x0) + 40;
+    });
+    const nameEdge = cols[0].lo;
+    const out = [];
+    for (const l of lines) {
+      if (l.y0 <= header.y0) continue;
+      const nameWords = l.words.filter(w => w.cx < nameEdge && /\p{L}{2,}/u.test(w.t));
+      if (!nameWords.length) continue;
+      const counts = emptyCounts();
+      for (const c of cols) {
+        const w = l.words.find(w => w.cx >= c.lo && w.cx < c.hi && wordValue(w.t) != null);
+        if (w) { counts[c.cat.id] = wordValue(w.t); verifySmall(fixes, counts, c.cat.id, w); }
+        else fixes.push({ counts, id: c.cat.id, box: { x0: Math.round(c.lo), x1: Math.round(c.hi), y0: l.y0 - 6, y1: l.y1 + 6 } });
+      }
+      const name = nameWords.map(w => w.t).join(' ').replace(/[^\p{L}\s]+/gu, ' ').replace(/\s+/g, ' ').trim();
+      out.push({ name, counts });
+    }
+    await applyFixes(fixes, worker, canvas);
+    return out;
+  }
+
+  // Kart: "İlk Paket ..... 120" gibi etiket satırları
+  const counts = emptyCounts();
+  let foundAny = false;
+  lines.forEach((l, i) => {
+    for (const c of state.categories) {
+      const k = findKeyWords(l.words, c);
+      if (!k || counts[c.id]) continue;
+      foundAny = true;
+      const w = l.words.slice(k.end).find(w => wordValue(w.t) != null);
+      if (w) { counts[c.id] = wordValue(w.t); verifySmall(fixes, counts, c.id, w); return; }
+      const next = lines[i + 1];
+      const nextVal = next && !state.categories.some(cc => findKeyWords(next.words, cc))
+        ? next.words.map(w => wordValue(w.t)).find(v => v != null) : null;
+      fixes.push({
+        counts, id: c.id, fallback: nextVal,
+        box: { x0: k.last.x1 + 8, x1: canvas.width, y0: l.y0 - 6, y1: l.y1 + 6 },
+      });
+      return;
+    }
+  });
+  if (!foundAny) return [];
+  await applyFixes(fixes, worker, canvas);
+  return [{ name: detectName(lines.map(l => l.text)), counts }];
+}
+
+// Tek haneli sayılar ana okumada sık karışır (7↔1, 4↔-): rakam modunda tekrar oku
+function verifySmall(fixes, counts, id, w) {
+  if (counts[id] < 10) fixes.push({ counts, id, fallback: counts[id], box: { x0: w.x0 - 6, x1: w.x1 + 6, y0: w.y0 - 6, y1: w.y1 + 6 } });
+}
+
+async function applyFixes(fixes, worker, canvas) {
+  if (!fixes.length) return;
+  await worker.setParameters({ tessedit_pageseg_mode: '8', tessedit_char_whitelist: '0123456789' });
+  try {
+    for (const f of fixes) {
+      const v = await readDigits(worker, canvas, f.box);
+      f.counts[f.id] = v ?? f.fallback ?? 0;
+    }
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: '3', tessedit_char_whitelist: '' });
+  }
+}
+
+async function readScreenshot(file, onProgress) {
+  const canvas = await prepareImage(file);
+  const worker = await getWorker(onProgress);
+  const { data } = await worker.recognize(canvas, {}, { blocks: true, text: true });
+  let found = await parseLayout(data, canvas, worker);
+  if (!found.length) found = parseOcr(data.text);
+  return { found, text: data.text };
 }
 
 let pending = []; // { name, counts, personId }
+let ocrQueue = Promise.resolve();
 
-async function handleFiles(files) {
+function handleFiles(files) {
   files = files.filter(f => f.type.startsWith('image/'));
   if (!files.length) return;
-  if (!state.apiKey) { toast('Önce Ayarlar’dan Claude API anahtarını gir'); showTab('ayarlar'); return; }
+  if (!window.Tesseract) { toast('Okuma modülü yüklenemedi, internet bağlantını kontrol et'); return; }
   const queue = $('#shotQueue');
-  await Promise.all(files.map(async file => {
+  for (const file of files) {
     const item = document.createElement('div');
     item.className = 'qitem';
-    item.innerHTML = `<img alt=""><span>Okunuyor…</span>`;
+    item.innerHTML = `<img alt=""><div class="qbody"><span class="st">Sırada…</span></div>`;
     item.querySelector('img').src = URL.createObjectURL(file);
     queue.prepend(item);
-    try {
-      const found = await readScreenshot(file);
-      item.querySelector('span').textContent = found.length ? `${found.length} kişi okundu: ${found.map(f => f.name).join(', ')}` : 'Kurye bulunamadı';
-      for (const f of found) {
-        const counts = {};
-        for (const c of state.categories) counts[c.id] = num(f.counts?.[c.id]);
-        // Aynı kişi birden fazla görüntüde varsa ilk okunan satırla birleştir
-        const p = matchPerson(f.name);
-        const same = pending.find(x => (p && x.personId === p.id) || norm(x.name) === norm(f.name));
-        if (same) { for (const c of state.categories) same.counts[c.id] += counts[c.id]; }
-        else pending.push({ key: uid(), name: f.name, counts, personId: p?.id || '' });
+    const st = item.querySelector('.st');
+    // OCR tek işçide sırayla çalışır
+    ocrQueue = ocrQueue.then(async () => {
+      try {
+        const { found, text } = await readScreenshot(file, m => {
+          if (m.status === 'recognizing text') st.textContent = `Okunuyor… %${Math.round(m.progress * 100)}`;
+          else st.textContent = 'Okuma modülü hazırlanıyor (ilk seferde biraz sürer)…';
+        });
+        st.textContent = found.length
+          ? `${found.length} kişi okundu: ${found.map(f => f.name || '(isim yok)').join(', ')}`
+          : 'Paket sayısı bulunamadı — okunan metne bak';
+        item.querySelector('.qbody').insertAdjacentHTML('beforeend',
+          `<details><summary class="small muted">Okunan metin</summary><pre class="ocr">${esc(text)}</pre></details>`);
+        for (const f of found) {
+          const p = f.name ? matchPerson(f.name) : null;
+          // Aynı kişi birden fazla görüntüde varsa topla
+          const same = pending.find(x => (p && x.personId === p.id) || (f.name && norm(x.name) === norm(f.name)));
+          if (same) { for (const c of state.categories) same.counts[c.id] += f.counts[c.id]; }
+          else pending.push({ key: uid(), name: f.name || 'İsim okunamadı', counts: f.counts, personId: p?.id || '' });
+        }
+      } catch (err) {
+        st.innerHTML = `<span class="err">Okunamadı: ${esc(err.message || err)}</span>`;
       }
-    } catch (err) {
-      item.querySelector('span').innerHTML = `<span class="err">Okunamadı: ${esc(err.message)}</span>`;
-    }
-  }));
-  renderReview();
+      renderReview();
+    });
+  }
 }
 
 function renderReview() {

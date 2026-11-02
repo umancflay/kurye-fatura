@@ -234,14 +234,17 @@ main { max-width: 960px; margin: 0 auto; padding: 16px; }
 .grid-counts label { margin: 6px 0; }
 
 /* Ayar satırları */
-.setrow { display: grid; grid-template-columns: 1fr 110px 80px auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.setrow { display: grid; grid-template-columns: 1fr 1.3fr 100px 70px auto; gap: 8px; align-items: center; margin-bottom: 8px; }
 .setrow.exp { grid-template-columns: 1fr 80px 100px auto auto; }
 .setrow .check { margin: 0; }
-@media (max-width: 520px) {
-  .setrow { grid-template-columns: 1fr auto auto; margin-bottom: 14px; }
+@media (max-width: 640px) {
+  .setrow { grid-template-columns: 1fr auto auto; margin-bottom: 16px; }
   .setrow.exp { grid-template-columns: 80px 1fr auto auto; }
-  .setrow > :first-child { grid-column: 1 / -1; }
+  .setrow > :first-child, .setrow > [data-f=keys] { grid-column: 1 / -1; }
 }
+.setrow [data-f=keys] { font-size: 13px; color: var(--muted); }
+.qbody { flex: 1; min-width: 0; }
+pre.ocr { white-space: pre-wrap; font-size: 12px; max-height: 220px; overflow: auto; background: var(--bg); padding: 8px; border-radius: 8px; margin: 6px 0 0; }
 
 dialog {
   border: 1px solid var(--line); border-radius: 20px;

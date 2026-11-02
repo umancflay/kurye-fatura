@@ -106,7 +106,7 @@
     <section id="tab-ayarlar" class="tab">
       <div class="card">
         <h2>Paket kategorileri ve standart fiyatlar</h2>
-        <p class="muted small">Kişiye özel fiyatlar Kişiler sekmesinden girilir; boş bırakılırsa buradaki fiyat kullanılır.</p>
+        <p class="muted small">Sütunlar: kategori adı · ekran görüntüsünde geçen adları (virgülle, okuma bunlara bakar) · standart fiyat. Kişiye özel fiyatlar Kişiler sekmesinden girilir.</p>
         <div id="catList"></div>
         <button class="secondary" id="addCat">+ Kategori ekle</button>
       </div>
@@ -122,13 +122,6 @@
         <h2>Fatura görseli</h2>
         <label>Firma / başlık<input id="company" placeholder="Örn. Depo Adı"></label>
         <label>Alt not<input id="footerNote" placeholder="Örn. Lütfen bu tutara fatura kesiniz."></label>
-      </div>
-
-      <div class="card">
-        <h2>Ekran görüntüsü okuma (Claude)</h2>
-        <p class="muted small">Görüntüdeki isim ve paket sayılarını okumak için Claude API anahtarı gerekir. Hesabında saklanır, giriş yapan tüm cihazlarda çalışır.</p>
-        <label>API anahtarı<input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
-        <label>Model<input id="model"></label>
       </div>
 
       <div class="card">
@@ -149,6 +142,7 @@
 <div id="toast" role="status"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
 </body>

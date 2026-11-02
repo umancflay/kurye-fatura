@@ -24,7 +24,18 @@ Veriler Supabase'te saklanır; sadece izin verilen e-postalar giriş yapabilir.
 
 - **Kategoriler ve fiyatlar:** standart paket fiyatlarını gir. Kişiye özel fiyat Kişiler sekmesinden girilir.
 - **Ekstra giderler:** ad + yüzde + “düş / ekle”. Brüt toplam üzerinden hesaplanır, kişiye göre oran değiştirilebilir.
-- **Claude API anahtarı:** ekran görüntüsünü okumak için (console.anthropic.com → API Keys). Hesapta saklanır.
+- **Ekran görüntüsündeki adlar:** her kategorinin yanındaki kutuya, ekran görüntüsünde o kategorinin hangi adlarla
+  yazdığını virgülle gir (örn. `çiftli, birleşen`). Okuma bu adlara bakar.
+
+## Ekran görüntüsü okuma (ücretsiz)
+
+API yok, ücret yok: görüntü Tesseract OCR ile tarayıcının içinde okunur, hiçbir yere gönderilmez. İlk kullanımda
+Türkçe dil dosyası (~5 MB) bir kez indirilir. İki düzeni tanır:
+- **Tablo:** başlıkta kategori adları, altında `Ad Soyad  12  3  4 ...` satırları (birden çok kurye).
+- **Kart:** tek kurye; `İlk Paket  120`, `Birleşen Paket  30` gibi satırlar.
+
+Sayılar ekrandaki konumlarına göre sütunlara bağlanır; tek haneli sayılar ayrıca rakam modunda doğrulanır.
+Kaydetmeden önce sayılar düzeltilebilir, okunan ham metin de görülebilir.
 
 ## Aylık kullanım
 
