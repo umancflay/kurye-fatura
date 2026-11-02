@@ -1443,9 +1443,9 @@ const isTouch = () => matchMedia('(pointer: coarse)').matches;
 const chatUrl = phone => isTouch() ? `https://wa.me/${phone}` : `https://web.whatsapp.com/send?phone=${phone}`;
 
 // Görseli panoya kopyalar; indirme yok. Kopyalanamazsa görsel ekranda gösterilir (basılı tut → kopyala)
-async function prepareSend(pid) {
+async function prepareSend(pid, toPhone) {
   const p = personById(pid);
-  const phone = waNumber(p.phone);
+  const phone = waNumber(toPhone ?? p.phone);
   if (!phone) { toast(`${p.name}: numara yok`); return null; }
   const blobPromise = renderInvoice(pid);
   let copied = false;
@@ -1554,17 +1554,36 @@ $('#bulkSend').onclick = () => {
     draw();
   };
   const opened = id => { const r = ready[id]; delete ready[id]; if (r?.img) setTimeout(() => URL.revokeObjectURL(r.img), 60000); markSent(id); draw(); };
+  // Deneme: sıradaki kişinin faturası, girilen numaraya; kimse gönderildi sayılmaz
+  const test = async () => {
+    const phone = $('#testPhone').value.trim();
+    if (!waNumber(phone)) { toast('Numara gir'); $('#testPhone').focus(); return; }
+    if (phone !== state.testPhone) { state.testPhone = phone; save(); }
+    const s = await prepareSend(nextId() || list[0].id, phone);
+    if (!s) return;
+    if (openChatNow(s)) { toast('Deneme · Ctrl+V'); return; }
+    $('#testOpen').innerHTML = `${s.img ? `<img class="sthumb" src="${s.img}" alt="Fatura">` : ''}<a class="button wa" href="${s.url}" target="kuryeWhatsApp" rel="noopener"><svg><use href="#i-wa"/></svg>Aç</a>`;
+  };
   const onKey = e => {
-    if (e.key === 'Enter' && $('#modal').open && $('#sendRows')) { e.preventDefault(); send(nextId()); }
+    if (e.key !== 'Enter' || !$('#modal').open || !$('#sendRows')) return;
+    e.preventDefault();
+    if (e.target.id === 'testPhone') test();
+    else send(nextId());
   };
   openModal(`
     <div class="row" style="justify-content:space-between"><h2>Gönder</h2><span class="badge" id="sendCount"></span></div>
+    <div class="sendrow testrow">
+      <input id="testPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="Deneme numarası" value="${esc(state.testPhone || '')}">
+      <span id="testOpen" class="row gap"></span>
+      <button type="button" class="secondary" data-x="test">Dene</button>
+    </div>
     <div id="sendRows" class="sendlist"></div>
     <div class="row gap end" style="margin-top:12px">
       <button type="button" class="secondary" data-x="reset">Sıfırla</button>
       <button value="close">Kapat</button>
     </div>`, () => document.removeEventListener('keydown', onKey), {
     send: e => send(e.target.closest('[data-id]').dataset.id),
+    test: () => test(),
     open: e => setTimeout(() => opened(e.target.closest('[data-id]').dataset.id), 300),
     reset: () => { for (const p of list) delete recs[p.id].sentAt; save(); renderPeriod(); draw(); },
   });

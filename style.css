@@ -286,3 +286,6 @@ a.button { text-decoration: none; }
 .sendrow > button, .sendrow > .button { flex: none; padding: 8px 12px; }
 .sendrow a.button svg { pointer-events: none; }
 input.secret { -webkit-text-security: disc; font-family: monospace; }
+.testrow { border-style: dashed; margin-top: 8px; }
+.testrow input { flex: 1; min-width: 0; }
+.testrow #testOpen:empty { display: none; }
