@@ -236,10 +236,6 @@ function render() {
   renderPeriod();
   renderPeople();
   renderSettings();
-  $('#reviewPeriod').textContent = periodLabel(currentPeriod());
-  $('#aiHint').textContent = engine() !== 'ocr' && aiReady()
-    ? `Görüntüler ${AI[engine()].label} yapay zekâsıyla okunur. Kaydetmeden önce sayıları görüntüyle karşılaştır.`
-    : '⚠ Yapay zekâ bağlı değil, basit OCR kullanılıyor. Telefonla çekilmiş panel fotoğraflarını OCR okuyamaz — Ayarlar → Ekran görüntüsü okuma bölümüne ücretsiz Gemini ya da Claude anahtarı gir.';
 }
 
 /* ---------- Dönem listesi ---------- */
@@ -289,7 +285,7 @@ function renderPeriod() {
   };
   $('#periodList').innerHTML =
     (withRec.map(card).join('') + without.map(card).join('')) ||
-    `<div class="card muted">Henüz kişi yok. “Ekran Görüntüsü” sekmesinden yükleme yapabilir ya da “Kişiler” sekmesinden kişi ekleyebilirsin.</div>`;
+    `<div class="card muted">Kayıt yok.</div>`;
 }
 $('#search').oninput = renderPeriod;
 $('#periodList').onclick = e => {
@@ -458,8 +454,6 @@ function renderSettings() {
       <input data-t="amount" type="number" inputmode="decimal" value="${t.amount}" aria-label="Bonus">
       <button class="danger" data-tdel>Sil</button>
     </div>`).join('');
-  const wk = weekendsIn(currentPeriod());
-  $('#tierInfo').textContent = `${periodLabel(currentPeriod())}: ${wk} hafta sonu. Örnek: 323 paket → ort. ${Math.round(323 / wk)} → ${money(weekendBonus(323).amount)}.`;
   const active = document.activeElement;
   for (const id of ['company', 'footerNote', 'claudeKey', 'claudeModel', 'geminiKey', 'geminiModel']) {
     if (active !== $('#' + id)) $('#' + id).value = state[id] || '';
@@ -512,7 +506,7 @@ for (const id of ['company', 'footerNote', 'claudeKey', 'claudeModel', 'geminiKe
   $('#' + id).onchange = e => { state[id] = e.target.value.trim(); save(); render(); };
 }
 $('#aiTest').onclick = async () => {
-  if (engine() === 'ocr') { toast('Basit OCR seçili, anahtar gerekmiyor'); return; }
+  if (engine() === 'ocr') { toast('OCR seçili'); return; }
   if (!aiReady()) { toast('Önce anahtarı gir'); return; }
   const btn = $('#aiTest');
   btn.disabled = true; btn.textContent = 'Deneniyor…';
@@ -530,7 +524,7 @@ $('#aiTest').onclick = async () => {
     const text = engine() === 'gemini' ? await readWithGemini(b64) : await readWithClaude(b64);
     const f = parseAiJson(text)[0];
     const ok = f && f.counts[state.categories[0].id] === 7 && f.counts[state.categories[1].id] === 13;
-    toast(ok ? `✓ ${AI[engine()].label} bağlı ve doğru okuyor` : `Bağlandı ama test sonucu beklenenden farklı: ${text.slice(0, 120)}`, 6000);
+    toast(ok ? 'Bağlantı tamam' : 'Bağlandı, sonuç farklı', 4000);
   } catch (e) {
     toast('Bağlantı hatası: ' + e.message, 8000);
   } finally {
@@ -609,7 +603,7 @@ async function enterApp(session) {
   if (error || !member?.length) {
     await sb.auth.signOut();
     user = null;
-    showAuth('Bu hesabın panele erişim izni yok.');
+    showAuth('Erişim izni yok.');
     return;
   }
   try {
@@ -1203,7 +1197,7 @@ function handleFiles(files) {
   files = files.filter(f => f.type.startsWith('image/'));
   if (!files.length) return;
   if (engine() !== 'ocr' && !aiReady()) {
-    toast(`${AI[engine()].label} anahtarı girilmemiş — şimdilik basit OCR ile okunuyor. Ayarlar’dan anahtar ekle.`, 6000);
+    toast('Okuma anahtarı yok', 3000);
   }
   const queue = $('#shotQueue');
   for (const file of files) {
@@ -1221,17 +1215,13 @@ function handleFiles(files) {
       const tick = setInterval(() => { if (label) st.textContent = `${label} ${Math.round((Date.now() - t0) / 1000)} sn`; }, 500);
       try {
         const { found, text, via } = await readScreenshot(file, m => {
-          if (m.status === 'ai') st.textContent = label = m.msg || `${AI[engine()].label} okuyor…`;
+          if (m.status === 'ai') st.textContent = label = 'Okunuyor…';
           else if (m.status === 'recognizing text') st.textContent = `Okunuyor… %${Math.round(m.progress * 100)}`;
-          else st.textContent = 'Okuma modülü hazırlanıyor (ilk seferde biraz sürer)…';
+          else st.textContent = 'Okunuyor…';
         });
         clearInterval(tick);
         const took = `${Math.round((Date.now() - t0) / 1000)} sn`;
-        st.textContent = found.length
-          ? `${via} · ${took} · ${found.length} kişi okundu: ${found.map(f => f.name || '(isim yok)').join(', ')}`
-          : `${via} · ${took} · paket sayısı bulunamadı — okunan metne bak`;
-        item.querySelector('.qbody').insertAdjacentHTML('beforeend',
-          `<details><summary class="small muted">Okunan metin</summary><pre class="ocr">${esc(text)}</pre></details>`);
+        st.textContent = found.length ? `${found.length} kişi · ${took}` : 'Okunamadı';
         for (const f of found) {
           const p = f.name ? matchPerson(f.name) : null;
           // Aynı kişi birden fazla görüntüde varsa topla
@@ -1259,7 +1249,7 @@ function renderReview() {
         ${r.img ? `<img class="rthumb" src="${r.img}" alt="Ekran görüntüsü" data-f="zoom" title="Büyüt">` : ''}
         <strong style="flex:1 1 140px">${esc(r.name)}</strong>
         <select data-f="person" style="flex:1 1 180px;width:auto">${opts(r.personId)}</select>
-        ${r.personId ? '' : r.auto ? '<span class="badge new">yeni kişi olarak eklenecek</span>' : '<span class="badge warn">eşleşmedi — listeden seç</span>'}
+        ${r.personId ? '' : r.auto ? '<span class="badge new">yeni</span>' : '<span class="badge warn">eşleşmedi</span>'}
         <button class="danger" data-f="drop" title="Bu satırı atla">✕</button>
       </div>
       <div class="grid-counts">
@@ -1307,8 +1297,7 @@ $('#reviewSave').onclick = () => {
   pending = [];
   save();
   $('#shotQueue').innerHTML = '';
-  toast(`${n} kişinin ${periodLabel(currentPeriod())} verisi kaydedildi` +
-    (created ? ` · ${created} yeni kişi eklendi, Kişiler’den WhatsApp numaralarını gir` : ''), created ? 7000 : 3000);
+  toast(`${n} kişi kaydedildi` + (created ? ` · ${created} yeni kişi` : ''), 3000);
   showTab(created ? 'kisiler' : 'donem');
 };
 
@@ -1319,7 +1308,7 @@ function renderInvoice(pid) {
   const c = calc(p, record(pid));
   const W = 1080, P = 64, rowH = 64;
   const rows = c.lines.filter(l => l.count);
-  const H = 360 + rows.length * rowH + rows.filter(l => l.note).length * 34 + 90 + c.expenses.length * 56 + 190 + (state.footerNote ? 70 : 0);
+  const H = 360 + rows.length * rowH + 90 + c.expenses.length * 56 + 190 + (state.footerNote ? 70 : 0);
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
@@ -1347,10 +1336,6 @@ function renderInvoice(pid) {
     right(String(l.count), 560, y);
     if (!l.bonus) right(money(l.price), 780, y);
     g.font = font(600, 30); right(money(l.amount), W - P, y);
-    if (l.note) {
-      y += 34;
-      g.fillStyle = '#5d6b69'; g.font = font(400, 22); g.fillText(l.note, P, y);
-    }
     y += 14;
     g.fillStyle = '#eef1f1'; g.fillRect(P, y, W - 2 * P, 1);
   }
@@ -1384,9 +1369,7 @@ function invoiceText(pid) {
   const c = calc(p, record(pid));
   const lines = [`*${p.name}* — ${periodLabel(currentPeriod())}`, ''];
   for (const l of c.lines.filter(l => l.count)) {
-    lines.push(l.bonus
-      ? `${l.name}: ${l.count} paket (${l.note}) = ${money(l.amount)}`
-      : `${l.name}: ${l.count} × ${money(l.price)} = ${money(l.amount)}`);
+    lines.push(l.bonus ? `${l.name}: ${money(l.amount)}` : `${l.name}: ${l.count} × ${money(l.price)} = ${money(l.amount)}`);
   }
   lines.push('', `Toplam: ${money(c.gross)}`);
   for (const e of c.expenses) lines.push(`${e.name} %${e.rate}: ${e.mode === 'add' ? '+' : '−'}${money(e.amount)}`);
@@ -1414,42 +1397,49 @@ async function previewInvoice(pid) {
 
 const isTouch = () => matchMedia('(pointer: coarse)').matches;
 
+// Bilgisayarda tek bir WhatsApp Web sekmesi kullanılır; her kişide aynı sekme o sohbete gider
+function openChat(phone) {
+  const url = isTouch() ? `https://wa.me/${phone}` : `https://web.whatsapp.com/send?phone=${phone}`;
+  window.open(url, 'kuryeWhatsApp');
+}
+
 async function sendWhatsApp(pid) {
   const p = personById(pid);
   const phone = waNumber(p.phone);
   const blobPromise = renderInvoice(pid);
 
-  // Telefon: paylaşım menüsü görseli doğrudan WhatsApp'a verir (kişiyi orada seçersin).
+  // Telefon: paylaşım menüsünden WhatsApp → kişi
   if (isTouch() && navigator.canShare) {
     const file = new File([await blobPromise], fileName(pid), { type: 'image/png' });
     if (navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share({ files: [file], text: invoiceText(pid) });
+        await navigator.share({ files: [file] });
         markSent(pid);
       } catch (e) { if (e.name !== 'AbortError') toast('Paylaşılamadı: ' + e.message); }
       return;
     }
   }
 
-  // Bilgisayar: görsel panoya kopyalanır, WhatsApp sohbeti açılır, Ctrl+V ile yapıştırılır.
+  // Bilgisayar: görsel panoya, sohbet açılır → Ctrl+V, Enter
   let copied = false;
   try {
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
     copied = true;
   } catch {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(await blobPromise);
-    a.download = fileName(pid);
-    a.click();
+    downloadBlob(await blobPromise, fileName(pid));
   }
-  if (phone) {
-    window.open(`https://wa.me/${phone}`, '_blank');
-  } else {
-    toast(`${p.name} için numara yok — Kişiler’den ekle`);
-  }
-  if (copied) toast('Görsel kopyalandı — WhatsApp sohbetinde Ctrl+V yapıp gönder', 5000);
-  else toast('Görsel indirildi — WhatsApp sohbetine ekleyip gönder', 5000);
+  if (!phone) { toast(`${p.name}: numara yok`); return; }
+  openChat(phone);
+  toast(copied ? 'Kopyalandı — Ctrl+V, Enter' : 'İndirildi', 3000);
   markSent(pid);
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
 function markSent(pid) {
@@ -1457,28 +1447,72 @@ function markSent(pid) {
   if (rec) { rec.sentAt = Date.now(); save(); renderPeriod(); }
 }
 
-// Sırayla gönder: gönderilmemiş kişileri tek tek açar.
-$('#bulkSend').onclick = () => {
+const peopleWithRecords = () => {
   const recs = state.records[currentPeriod()] || {};
-  const todo = state.people.filter(p => recs[p.id] && !recs[p.id].sentAt);
-  if (!todo.length) { toast('Gönderilmemiş kişi yok'); return; }
-  let i = 0;
-  const step = () => {
-    const p = todo[i];
-    openModal(`
-      <h2>${i + 1} / ${todo.length}: ${esc(p.name)}</h2>
-      <p class="muted">${money(calc(p, recs[p.id]).net)} — ${esc(p.phone || 'numara yok')}</p>
-      <div class="row gap end">
-        <button value="stop" class="secondary">Bitir</button>
-        <button type="button" class="secondary" data-x="skip">Atla</button>
-        <button type="button" class="wa" data-x="send">WhatsApp'a gönder</button>
-      </div>`, null, {
-      send: async () => { closeModal(); await sendWhatsApp(p.id); next(); },
-      skip: () => { closeModal(); next(); },
-    });
+  return state.people.filter(p => recs[p.id]).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+};
+
+// Hepsini indir: bilgisayarda tek ZIP, telefonda paylaşım menüsünden "Kaydet"
+$('#saveAll').onclick = async () => {
+  const list = peopleWithRecords();
+  if (!list.length) { toast('Bu ay kayıt yok'); return; }
+  const btn = $('#saveAll');
+  btn.disabled = true;
+  try {
+    const files = [];
+    for (const p of list) files.push(new File([await renderInvoice(p.id)], `${p.name} - ${periodLabel(currentPeriod())}.png`, { type: 'image/png' }));
+    if (isTouch() && navigator.canShare?.({ files })) {
+      try { await navigator.share({ files }); } catch (e) { if (e.name !== 'AbortError') throw e; }
+    } else if (window.JSZip) {
+      const zip = new JSZip();
+      for (const f of files) zip.file(f.name, f);
+      downloadBlob(await zip.generateAsync({ type: 'blob' }), `Faturalar - ${periodLabel(currentPeriod())}.zip`);
+    } else {
+      for (const f of files) downloadBlob(f, f.name);
+    }
+  } catch (e) {
+    toast('İndirilemedi: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// Gönderim listesi: herkes tek ekranda; Enter sıradakini gönderir
+$('#bulkSend').onclick = () => {
+  const list = peopleWithRecords();
+  if (!list.length) { toast('Bu ay kayıt yok'); return; }
+  const recs = state.records[currentPeriod()];
+  const rows = () => list.map(p => {
+    const sent = !!recs[p.id]?.sentAt;
+    return `<div class="sendrow ${sent ? 'done' : ''}" data-id="${p.id}">
+      <span class="avatar">${esc(initials(p.name))}</span>
+      <div class="sname"><b>${esc(p.name)}</b><span>${money(calc(p, recs[p.id]).net)}${p.phone ? '' : ' · numara yok'}</span></div>
+      <button type="button" class="${sent ? 'secondary' : 'wa'}" data-x="send">${sent ? '✓' : 'Gönder'}</button>
+    </div>`;
+  }).join('');
+  const nextId = () => list.find(p => !recs[p.id]?.sentAt && p.phone)?.id;
+  const draw = () => {
+    $('#sendRows').innerHTML = rows();
+    const n = nextId();
+    $('#sendRows').querySelector(`[data-id="${n}"]`)?.classList.add('next');
+    $('#sendCount').textContent = `${list.filter(p => recs[p.id]?.sentAt).length} / ${list.length}`;
   };
-  const next = () => { i++; if (i < todo.length) setTimeout(step, 400); else toast('Liste bitti'); };
-  step();
+  const send = async id => { if (!id) return; await sendWhatsApp(id); draw(); };
+  const onKey = e => {
+    if (e.key === 'Enter' && $('#modal').open && $('#sendRows')) { e.preventDefault(); send(nextId()); }
+  };
+  openModal(`
+    <div class="row" style="justify-content:space-between"><h2>Gönder</h2><span class="badge" id="sendCount"></span></div>
+    <div id="sendRows" class="sendlist"></div>
+    <div class="row gap end" style="margin-top:12px">
+      <button type="button" class="secondary" data-x="reset">Sıfırla</button>
+      <button value="close">Kapat</button>
+    </div>`, () => document.removeEventListener('keydown', onKey), {
+    send: e => send(e.target.closest('[data-id]').dataset.id),
+    reset: () => { for (const p of list) delete recs[p.id].sentAt; save(); renderPeriod(); draw(); },
+  });
+  document.addEventListener('keydown', onKey);
+  draw();
 };
 
 /* ---------- Başlat ---------- */

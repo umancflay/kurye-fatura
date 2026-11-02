@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 
@@ -66,7 +66,8 @@
       <div class="summary" id="summary"></div>
       <div class="toolbar">
         <input type="search" id="search" placeholder="Kişi ara…">
-        <button id="bulkSend" class="wa"><svg><use href="#i-wa"/></svg>Sırayla gönder</button>
+        <button id="saveAll" class="secondary">Hepsini indir</button>
+        <button id="bulkSend" class="wa"><svg><use href="#i-wa"/></svg>Gönder</button>
       </div>
       <div id="periodList" class="list"></div>
     </section>
@@ -77,14 +78,12 @@
         <input type="file" id="shotInput" accept="image/*" multiple hidden>
         <span class="drop-icon"><svg><use href="#i-img"/></svg></span>
         <strong>Ekran görüntüsü seç</strong>
-        <span>veya buraya sürükle / Ctrl+V ile yapıştır · birden fazla seçebilirsin</span>
+        <span>veya sürükle / yapıştır</span>
       </label>
-      <p class="muted small" id="aiHint"></p>
       <div id="shotQueue"></div>
       <div id="review" hidden>
-        <h2>Okunan veriler</h2>
-        <p class="muted small">Kontrol et, gerekirse düzelt, sonra kaydet. Kayıt <b id="reviewPeriod"></b> dönemine yapılır.</p>
-        <label class="check"><input type="checkbox" id="addMode"> Mevcut sayıların üzerine ekle (kapalıysa üzerine yazar)</label>
+        <h2>Kontrol</h2>
+        <label class="check"><input type="checkbox" id="addMode"> Mevcut sayılara ekle</label>
         <div id="reviewRows"></div>
         <div class="row gap end">
           <button class="secondary" id="reviewCancel">Vazgeç</button>
@@ -105,61 +104,53 @@
     <!-- AYARLAR -->
     <section id="tab-ayarlar" class="tab">
       <div class="card">
-        <h2>Paket kategorileri ve standart fiyatlar</h2>
-        <p class="muted small">Sütunlar: kategori adı · ekran görüntüsünde geçen adları (virgülle, okuma bunlara bakar) · standart fiyat. Kişiye özel fiyatlar Kişiler sekmesinden girilir.</p>
+        <h2>Paketler</h2>
         <div id="catList"></div>
         <button class="secondary" id="addCat">+ Kategori ekle</button>
       </div>
 
       <div class="card">
-        <h2>Hafta sonu bonus baremi</h2>
-        <p class="muted small">Cumartesi + pazar teslimatlarına göre, her hafta sonu için. Ekranda sadece aylık toplam olduğundan: toplam ÷ aydaki hafta sonu sayısı = hafta sonu başına ortalama → baremdeki bonus × hafta sonu sayısı.</p>
-        <div class="setrow tier muted small"><span>En az</span><span>En çok (boş = üstü)</span><span>Bonus ₺ / hafta sonu</span><span></span></div>
+        <h2>Hafta sonu bonusu</h2>
+        <div class="setrow tier muted small"><span>En az</span><span>En çok</span><span>Bonus ₺</span><span></span></div>
         <div id="tierList"></div>
         <button class="secondary" id="addTier">+ Barem ekle</button>
-        <p class="muted small" id="tierInfo"></p>
       </div>
 
       <div class="card">
-        <h2>Ekstra giderler (yüzdelik)</h2>
-        <p class="muted small">Brüt toplam üzerinden hesaplanır. “Düş” fatura tutarından çıkarır, “Ekle” üstüne ekler. Kişiye özel oran Kişiler sekmesinden değiştirilebilir.</p>
+        <h2>Giderler</h2>
         <div id="expList"></div>
         <button class="secondary" id="addExp">+ Gider ekle</button>
       </div>
 
       <div class="card">
-        <h2>Ekran görüntüsü okuma</h2>
+        <h2>Okuma</h2>
         <label>Okuyucu
           <select id="aiEngine">
-            <option value="claude">Claude (en doğru · kullandıkça çok az ücret)</option>
-            <option value="gemini">Google Gemini (ücretsiz anahtar)</option>
-            <option value="ocr">Basit OCR (ücretsiz · zayıf)</option>
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="ocr">OCR</option>
           </select>
         </label>
         <div data-engine="claude">
-          <p class="muted small">console.anthropic.com → API Keys → Create Key. Claude sohbet aboneliğinden ayrıdır; konsola yüklediğin krediden düşer. Bir ekran görüntüsü yaklaşık 2–3 sent (1 TL civarı) tutar.</p>
           <label>Claude API anahtarı<input id="claudeKey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
           <label>Model<input id="claudeModel"></label>
         </div>
         <div data-engine="gemini">
-          <p class="muted small">aistudio.google.com → Get API key → Create API key. Google hesabıyla ücretsiz; günlük kullanım sınırı var.</p>
           <label>Gemini API anahtarı<input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…"></label>
           <label>Model<input id="geminiModel"></label>
         </div>
-        <div data-engine="ocr"><p class="muted small">Anahtar gerektirmez ama küçük ve tek haneli sayılarda hata yapabilir.</p></div>
-        <p class="muted small">Anahtar hesabında saklanır; giriş yapan her cihazda çalışır.</p>
+        <div data-engine="ocr"></div>
         <button class="secondary" id="aiTest" type="button">Bağlantıyı test et</button>
       </div>
 
       <div class="card">
-        <h2>Fatura görseli</h2>
+        <h2>Fatura</h2>
         <label>Firma / başlık<input id="company" placeholder="Örn. Depo Adı"></label>
         <label>Alt not<input id="footerNote" placeholder="Örn. Lütfen bu tutara fatura kesiniz."></label>
       </div>
 
       <div class="card">
         <h2>Yedek</h2>
-        <p class="muted small">Veriler hesabında otomatik kaydedilir. İstersen ek olarak dosya yedeği al.</p>
         <div class="row gap">
           <button class="secondary" id="exportBtn">JSON indir</button>
           <label class="button secondary">JSON yükle<input type="file" id="importInput" accept="application/json" hidden></label>
@@ -176,7 +167,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="config.js?v=12"></script>
-<script src="app.js?v=12"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="config.js?v=13"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>
