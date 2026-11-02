@@ -712,12 +712,29 @@ function enterDemo() {
   user = { id: 'demo', email: 'deneme' };
   const cached = cacheLoad();
   state = cached.people ? Object.assign(defaultState(), cached) : demoState();
+  borrowAiKeys();
   cacheSave();
   document.body.classList.add('demo');
   setSync('deneme');
   $('#auth').hidden = true;
   $('#app').hidden = false;
   render();
+}
+
+// Bu cihazda daha önce giriş yapılmışsa okuma anahtarlarını oradan al (anahtar siteye gömülmez)
+const AI_FIELDS = ['aiEngine', 'geminiKey', 'geminiModel', 'claudeKey', 'claudeModel'];
+function borrowAiKeys() {
+  if (state.geminiKey || state.claudeKey) return;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k.startsWith(STORE_KEY + ':') || /:(demo|anon)$/.test(k)) continue;
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem(k)); } catch { continue; }
+    if (saved?.geminiKey || saved?.claudeKey) {
+      for (const f of AI_FIELDS) if (saved[f]) state[f] = saved[f];
+      return;
+    }
+  }
 }
 
 function exitDemo() {
@@ -732,6 +749,7 @@ $('#demoBtn').onclick = enterDemo;
 $('#demoReset').onclick = () => {
   if (!confirm('Deneme verisi sıfırlansın mı?')) return;
   state = demoState();
+  borrowAiKeys();
   cacheSave();
   render();
 };
