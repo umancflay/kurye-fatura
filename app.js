@@ -47,12 +47,14 @@ function cacheSave() {
 }
 
 let user = null;
+let demo = false;
 let state = defaultState();
 
 let pushTimer = null;
 function save() {
   state.updatedAt = Date.now();
   cacheSave();
+  if (demo) return;
   clearTimeout(pushTimer);
   setSync('kaydediliyor…');
   pushTimer = setTimeout(pushCloud, 800);
@@ -599,7 +601,7 @@ $('#importInput').onchange = async e => {
 
 async function pushCloud() {
   pushTimer = null;
-  if (!sb || !user) return;
+  if (!sb || !user || demo) return;
   const { error } = await sb.from('kurye_store').upsert({
     id: 'main', data: state, updated_at: new Date().toISOString(), updated_by: user.email,
   });
@@ -626,7 +628,7 @@ async function loadCloud() {
 
 // Diğer cihazda yapılan değişiklikleri sekmeye dönünce al
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && user && !pushTimer && !$('#modal').open && !pending.length) {
+  if (document.visibilityState === 'visible' && user && !demo && !pushTimer && !$('#modal').open && !pending.length) {
     loadCloud().then(render).catch(() => setSync('bağlantı yok'));
   }
 });
@@ -674,11 +676,64 @@ $('#loginForm').onsubmit = async e => {
 };
 
 $('#logoutBtn').onclick = async () => {
+  if (demo) { exitDemo(); return; }
   if (pushTimer) { clearTimeout(pushTimer); await pushCloud(); }
   await sb.auth.signOut();
   user = null;
   state = defaultState();
   showAuth();
+};
+
+/* ---------- Deneme (girişsiz) ---------- */
+
+function demoState() {
+  const st = defaultState();
+  const price = { tekli: 45, ciftli: 30, carsi: 50, finans: 60, yemek: 40 };
+  for (const c of st.categories) if (price[c.id]) c.price = price[c.id];
+  st.company = 'Deneme Depo';
+  st.people = [
+    { id: 'd1', name: 'Ali Yılmaz', phone: '', prices: {}, expenses: {}, aliases: [] },
+    { id: 'd2', name: 'Mehmet Demir', phone: '', prices: {}, expenses: {}, aliases: [] },
+    { id: 'd3', name: 'Ayşe Kaya', phone: '', prices: {}, expenses: {}, aliases: [] },
+  ];
+  st.records = {
+    [currentPeriod()]: {
+      d1: { counts: { tekli: 412, ciftli: 260, carsi: 18, finans: 2, yemek: 0, haftasonu: 290 } },
+      d2: { counts: { tekli: 285, ciftli: 140, carsi: 9, finans: 0, yemek: 4, haftasonu: 150 } },
+      d3: { counts: { tekli: 130, ciftli: 64, carsi: 3, finans: 1, yemek: 0, haftasonu: 70 } },
+    },
+  };
+  st.migratedHaftasonu = st.migratedGemini = true;
+  return st;
+}
+
+function enterDemo() {
+  demo = true;
+  user = { id: 'demo', email: 'deneme' };
+  const cached = cacheLoad();
+  state = cached.people ? Object.assign(defaultState(), cached) : demoState();
+  cacheSave();
+  document.body.classList.add('demo');
+  setSync('deneme');
+  $('#auth').hidden = true;
+  $('#app').hidden = false;
+  render();
+}
+
+function exitDemo() {
+  demo = false;
+  user = null;
+  state = defaultState();
+  document.body.classList.remove('demo');
+  showAuth();
+}
+
+$('#demoBtn').onclick = enterDemo;
+$('#demoReset').onclick = () => {
+  if (!confirm('Deneme verisi sıfırlansın mı?')) return;
+  state = demoState();
+  cacheSave();
+  render();
 };
 
 /* ---------- Ekran görüntüsü okuma ---------- */

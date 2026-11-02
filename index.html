@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
 
@@ -34,6 +34,7 @@
       <button type="submit" class="block" id="loginBtn">Giriş yap</button>
       <p class="form-msg" id="loginMsg"></p>
     </form>
+    <button type="button" class="secondary block" id="demoBtn">Deneme olarak gir</button>
     <div id="setupMsg" class="notice" hidden>
       Bu kurulumda Supabase bağlantısı henüz yapılmamış. <code>config.js</code> dosyasına Supabase adresini ve anon anahtarını gir.
     </div>
@@ -44,7 +45,7 @@
 <!-- UYGULAMA -->
 <div id="app" hidden>
   <header class="top">
-    <div class="brand"><span class="mark"><svg><use href="#i-box"/></svg></span><div><strong>Kurye Fatura</strong><small id="syncState">hazır</small></div></div>
+    <div class="brand"><span class="mark"><svg><use href="#i-box"/></svg></span><div><strong>Kurye Fatura</strong><small id="syncState">hazır</small></div><span class="badge demo-badge demo-only">DENEME</span></div>
     <div class="period">
       <button class="icon" id="prevMonth" aria-label="Önceki ay">‹</button>
       <input type="month" id="period" aria-label="Dönem">
@@ -103,6 +104,11 @@
 
     <!-- AYARLAR -->
     <section id="tab-ayarlar" class="tab">
+      <div class="card demo-only">
+        <h2>Deneme</h2>
+        <button class="secondary" id="demoReset">Deneme verisini sıfırla</button>
+      </div>
+
       <div class="card">
         <h2>Paketler</h2>
         <div id="catList"></div>
@@ -168,7 +174,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="config.js?v=17"></script>
-<script src="app.js?v=17"></script>
+<script src="config.js?v=18"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

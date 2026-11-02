@@ -289,3 +289,9 @@ input.secret { -webkit-text-security: disc; font-family: monospace; }
 .testrow { border-style: dashed; margin-top: 8px; }
 .testrow input { flex: 1; min-width: 0; }
 .testrow #testOpen:empty { display: none; }
+.demo-only { display: none !important; }
+body.demo .demo-only { display: block !important; }
+body.demo .demo-badge { display: inline-block !important; }
+.demo-badge { background: #f59e0b; color: #1c1300; margin-left: 4px; }
+body.demo .top { border-bottom: 2px solid #f59e0b; }
+#demoBtn { margin-top: 10px; }
