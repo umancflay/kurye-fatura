@@ -268,3 +268,6 @@ dialog img { max-width: 100%; border-radius: 12px; border: 1px solid var(--line)
 
 .credit { text-align: center; font-size: 12px; color: var(--muted); padding: 8px 16px 20px; letter-spacing: .02em; }
 .credit b { color: var(--text); font-weight: 800; }
+.rrow.newperson { border-color: var(--accent); }
+.badge.new { background: var(--accent-soft); color: var(--accent); }
+.badge.warn { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }

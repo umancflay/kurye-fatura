@@ -13,11 +13,12 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 function defaultState() {
   return {
     categories: [
-      { id: 'tekli', name: 'Tekli (İlk paket)', price: 0 },
-      { id: 'ciftli', name: 'Çiftli (Birleşen)', price: 0 },
-      { id: 'finans', name: 'Finans', price: 0 },
+      { id: 'tekli', name: 'İlk paket', price: 0 },
+      { id: 'ciftli', name: 'Birleşen', price: 0 },
       { id: 'carsi', name: 'Çarşı', price: 0 },
+      { id: 'finans', name: 'Finans', price: 0 },
       { id: 'yemek', name: 'Yemek', price: 0 },
+      { id: 'haftasonu', name: 'Hafta sonu', price: 0 },
     ],
     expenses: [],
     people: [],
@@ -74,6 +75,9 @@ function setSync(text, title = '') {
   el.textContent = text;
   el.title = title;
 }
+const titleCase = name => name === name.toLocaleUpperCase('tr')
+  ? name.toLocaleLowerCase('tr').replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toLocaleUpperCase('tr'))
+  : name;
 const initials = name => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toLocaleUpperCase('tr')).join('');
 
 // Türkçe karakterleri sadeleştirip isim eşleştirme için normalize eder.
@@ -170,14 +174,30 @@ $('#period').onchange = render;
   $('#period').value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// Eski kayıtlara sonradan eklenen varsayılanları bir kez uygular
+function migrate() {
+  if (!state.migratedHaftasonu) {
+    state.migratedHaftasonu = true;
+    if (!state.categories.some(c => c.id === 'haftasonu')) {
+      state.categories.push({ id: 'haftasonu', name: 'Hafta sonu', price: 0 });
+    }
+    for (const c of state.categories) {
+      if (c.id === 'tekli' && c.name === 'Tekli (İlk paket)') c.name = 'İlk paket';
+      if (c.id === 'ciftli' && c.name === 'Çiftli (Birleşen)') c.name = 'Birleşen';
+    }
+    save();
+  }
+}
+
 function render() {
+  if (user) migrate();
   renderPeriod();
   renderPeople();
   renderSettings();
   $('#reviewPeriod').textContent = periodLabel(currentPeriod());
   $('#aiHint').textContent = engine() !== 'ocr' && aiReady()
     ? `Görüntüler ${AI[engine()].label} yapay zekâsıyla okunur. Kaydetmeden önce sayıları görüntüyle karşılaştır.`
-    : 'Şu an basit OCR ile okunuyor (zayıf). Daha doğru okuma için Ayarlar → Ekran görüntüsü okuma bölümünden Claude ya da ücretsiz Gemini anahtarı gir.';
+    : '⚠ Yapay zekâ bağlı değil, basit OCR kullanılıyor. Telefonla çekilmiş panel fotoğraflarını OCR okuyamaz — Ayarlar → Ekran görüntüsü okuma bölümüne ücretsiz Gemini ya da Claude anahtarı gir.';
 }
 
 /* ---------- Dönem listesi ---------- */
@@ -662,11 +682,12 @@ function prepareImage(file) {
 }
 
 const DEFAULT_KEYS = {
-  tekli: 'tekli, ilk paket, ilk',
-  ciftli: 'çiftli, birleşen, birlesen, birleşik',
-  finans: 'finans',
-  carsi: 'çarşı, carsi',
-  yemek: 'yemek',
+  tekli: 'G10 İlk Sipariş Sayısı, ilk paket, ilk, tekli',
+  ciftli: 'G10 Birleşen Sipariş Sayısı, birleşen, birlesen, çiftli',
+  finans: 'Getir Finans Sipariş Sayısı, finans',
+  carsi: 'Çarşı Sipariş Sayısı, çarşı, carsi',
+  yemek: 'Yemek Sipariş Sayısı, yemek',
+  haftasonu: 'Haftasonu Sipariş Sayısı, hafta sonu, haftasonu',
 };
 const catKeys = c => String(c.keys ?? DEFAULT_KEYS[c.id] ?? c.name)
   .split(',').map(norm).filter(Boolean).sort((a, b) => b.length - a.length);
@@ -948,20 +969,23 @@ function imageToBase64(file, max = 2000) {
 }
 
 function aiPrompt() {
-  const cats = state.categories.map(c => `- "${c.id}": ${c.name} (ekranda şöyle geçebilir: ${c.keys ?? DEFAULT_KEYS[c.id] ?? c.name})`).join('\n');
+  const cats = state.categories.map(c => `- "${c.id}" (${c.name}): şu sütun/etiketten al → ${c.keys ?? DEFAULT_KEYS[c.id] ?? c.name}`).join('\n');
   const people = state.people.map(p => p.name).join(', ');
-  return `Bu ekran görüntüsü bir depodaki kuryelerin paket sayılarını gösteriyor. Görüntüde bir ya da birden fazla kurye olabilir.
-Her kurye için adını ve aşağıdaki kategorilerdeki paket ADETLERİNİ çıkar.
+  return `Bu görüntü bir kurye yönetim panelinin ekranı (çoğu zaman telefonla ekrandan çekilmiş, eğik ya da bulanık olabilir).
+Genelde bir tablodur: her satır bir kurye, ilk sütun "Ad", diğer sütunlar sayılardır. Sütun başlıkları birkaç satıra bölünmüş olabilir, örneğin:
+Ad | G10 İlk Sipariş Sayısı | G10 Birleşen Sipariş Sayısı | Mor Saatler G10 Sipariş Sayısı | G10 Mesafe KM | GB İlk Sipariş Sayısı | GB Birleşen Sipariş Sayısı | Mor Saatler GB Sipariş Sayısı | GB Mesafe KM | GB 30-50 KG Sipariş Sayısı | GB 50+ KG Sipariş Sayısı | Yemek Sipariş Sayısı | Kuzeyden Sipariş Sayısı | Damacana Sayısı | Çarşı Sipariş Sayısı | Getir Finans Sipariş Sayısı | Haftasonu Sipariş Sayısı
+Bazen de tek kurye için "İLK PAKET 658", "BİRLEŞEN 307" gibi etiket–değer satırları olur.
 
-Kategoriler (anahtar: açıklama):
+Görüntüdeki HER kurye satırı için adı ve aşağıdaki değerleri çıkar:
 ${cats}
 
 Kurallar:
-- "Tekli" = "ilk paket", "çiftli" = "birleşen paket".
-- Sadece ADET yaz. Para tutarlarını (₺, TL, kuruşlu sayılar) ve toplam satırlarını kategori sayısı olarak YAZMA.
-- Görüntüde olmayan kategori için 0 yaz. Rakamları dikkatle oku; 1 ile 7, 3 ile 8, 0 ile 6 karışmasın.
-- İsmi görüntüde yazdığı gibi, Türkçe karakterleriyle yaz.${people ? `\n- Bilinen kuryeler: ${people}. Görüntüdeki isim bunlardan birine benziyorsa bu yazılışı kullan.` : ''}
-- Görüntüde kurye bilgisi yoksa "couriers" boş liste olsun.
+- Önce başlıkları oku ve her sütunun yerini belirle; sonra her satırdaki sayıyı DOĞRU SÜTUNDAN al. Sütunları kaydırma.
+- Yukarıda istenmeyen sütunları (Mesafe KM, Mor Saatler, GB, Kuzeyden, Damacana vb.) YOK SAY.
+- Sadece adet yaz. Ondalıklı KM değerlerini ve para tutarlarını kullanma. Görüntüde olmayan değer için 0 yaz.
+- Rakamları dikkatle oku; 1–7, 3–8, 0–6–9 karışmasın. Emin olmadığın satırda yine en olası değeri yaz.
+- İsmi tam ve Türkçe karakterleriyle yaz (ö, ü, ş, ç, ğ, ı, İ).${people ? `\n- Kayıtlı kuryeler: ${people}. Görüntüdeki isim bunlardan birine benziyorsa aynen bu yazılışı kullan; değilse görüntüdeki gibi yaz.` : ''}
+- Tablo kaydırılmış/yarım görünen satırları da al. Görüntüde kurye yoksa "couriers" boş liste olsun.
 
 Sadece şu biçimde geçerli JSON döndür, başka hiçbir şey yazma:
 {"couriers":[{"name":"Ad Soyad","counts":{${state.categories.map(c => `"${c.id}":0`).join(',')}}}]}`;
@@ -1063,8 +1087,8 @@ function handleFiles(files) {
           const p = f.name ? matchPerson(f.name) : null;
           // Aynı kişi birden fazla görüntüde varsa topla
           const same = pending.find(x => (p && x.personId === p.id) || (f.name && norm(x.name) === norm(f.name)));
-          if (same) { for (const c of state.categories) same.counts[c.id] += f.counts[c.id]; }
-          else pending.push({ key: uid(), name: f.name || 'İsim okunamadı', counts: f.counts, personId: p?.id || '', img: imgUrl });
+          if (same) { same.counts = f.counts; same.img = imgUrl; }
+          else pending.push({ key: uid(), name: f.name || 'İsim okunamadı', counts: f.counts, personId: p?.id || '', img: imgUrl, auto: via !== 'OCR' });
         }
       } catch (err) {
         st.innerHTML = `<span class="err">Okunamadı: ${esc(err.message || err)}</span>`;
@@ -1080,12 +1104,12 @@ function renderReview() {
     [...state.people].sort((a, b) => a.name.localeCompare(b.name, 'tr'))
       .map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
   $('#reviewRows').innerHTML = pending.map(r => `
-    <div class="rrow ${r.personId ? '' : 'unmatched'}" data-key="${r.key}">
+    <div class="rrow ${r.personId ? '' : r.auto ? 'newperson' : 'unmatched'}" data-key="${r.key}">
       <div class="row gap">
         ${r.img ? `<img class="rthumb" src="${r.img}" alt="Ekran görüntüsü" data-f="zoom" title="Büyüt">` : ''}
         <strong style="flex:1 1 140px">${esc(r.name)}</strong>
         <select data-f="person" style="flex:1 1 180px;width:auto">${opts(r.personId)}</select>
-        ${r.personId ? '' : '<button class="secondary" data-f="new">Yeni kişi olarak ekle</button>'}
+        ${r.personId ? '' : r.auto ? '<span class="badge new">yeni kişi olarak eklenecek</span>' : '<span class="badge warn">eşleşmedi — listeden seç</span>'}
         <button class="danger" data-f="drop" title="Bu satırı atla">✕</button>
       </div>
       <div class="grid-counts">
@@ -1104,15 +1128,24 @@ $('#reviewRows').addEventListener('click', e => {
   if (!f || e.target.tagName !== 'BUTTON') return;
   const row = pending.find(r => r.key === e.target.closest('[data-key]').dataset.key);
   if (f === 'drop') { pending = pending.filter(r => r !== row); renderReview(); }
-  if (f === 'new') editPerson(null, row.name, p => { row.personId = p.id; renderReview(); });
 });
 $('#reviewCancel').onclick = () => { pending = []; renderReview(); };
 $('#reviewSave').onclick = () => {
-  const unmatched = pending.filter(r => !r.personId);
-  if (unmatched.length && !confirm(`${unmatched.length} satır bir kişiyle eşleşmedi, bunlar atlanacak. Devam?`)) return;
   const add = $('#addMode').checked;
-  let n = 0;
-  for (const r of pending.filter(r => r.personId)) {
+  let n = 0, created = 0;
+  for (const r of pending) {
+    if (!r.personId) {
+      const name = r.name.trim();
+      if (!r.auto || !name || name === 'İsim okunamadı') continue;
+      const existing = matchPerson(name);
+      if (existing) r.personId = existing.id;
+      else {
+        const np = { id: uid(), name: titleCase(name), phone: '', prices: {}, expenses: {}, aliases: [] };
+        state.people.push(np);
+        r.personId = np.id;
+        created++;
+      }
+    }
     const p = personById(r.personId);
     // Ekran görüntüsündeki farklı yazılışı hatırla, bir dahaki sefere otomatik eşleşsin
     if (norm(r.name) !== norm(p.name) && !(p.aliases || []).some(a => norm(a) === norm(r.name))) {
@@ -1124,8 +1157,9 @@ $('#reviewSave').onclick = () => {
   pending = [];
   save();
   $('#shotQueue').innerHTML = '';
-  toast(`${n} kişinin ${periodLabel(currentPeriod())} verisi kaydedildi`);
-  showTab('donem');
+  toast(`${n} kişinin ${periodLabel(currentPeriod())} verisi kaydedildi` +
+    (created ? ` · ${created} yeni kişi eklendi, Kişiler’den WhatsApp numaralarını gir` : ''), created ? 7000 : 3000);
+  showTab(created ? 'kisiler' : 'donem');
 };
 
 /* ---------- Fatura görseli ---------- */
