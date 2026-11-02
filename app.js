@@ -212,7 +212,34 @@ $('#period').onchange = render;
 }
 
 // Eski kayıtlara sonradan eklenen varsayılanları bir kez uygular
+// Aynı isimli kişileri tek kişide birleştirir (ekran görüntüsünden + elle eklenince kopya oluşabiliyor)
+function mergeDuplicates() {
+  const groups = {};
+  for (const p of state.people) (groups[norm(p.name)] ??= []).push(p);
+  let changed = false;
+  for (const list of Object.values(groups)) {
+    if (list.length < 2) continue;
+    const recCount = p => Object.values(state.records).filter(r => r[p.id]).length;
+    list.sort((a, b) => recCount(b) - recCount(a) || !!b.phone - !!a.phone);
+    const [keep, ...rest] = list;
+    for (const d of rest) {
+      if (!keep.phone && d.phone) keep.phone = d.phone;
+      keep.aliases = [...new Set([...(keep.aliases || []), ...(d.aliases || [])])];
+      keep.prices = { ...(d.prices || {}), ...(keep.prices || {}) };
+      keep.expenses = { ...(d.expenses || {}), ...(keep.expenses || {}) };
+      for (const per of Object.values(state.records)) {
+        if (per[d.id] && !per[keep.id]) per[keep.id] = per[d.id];
+        delete per[d.id];
+      }
+      state.people = state.people.filter(x => x !== d);
+    }
+    changed = true;
+  }
+  return changed;
+}
+
 function migrate() {
+  if (mergeDuplicates()) save();
   if (!state.migratedGemini) {
     state.migratedGemini = true;
     if (state.aiEngine === 'claude' && !state.claudeKey) state.aiEngine = 'gemini';
@@ -425,7 +452,16 @@ function editPerson(p, presetName = '', after) {
       const on = f['expon_' + e.id].checked;
       if (rate !== '' || on !== e.enabled) p.expenses[e.id] = { rate: rate === '' ? '' : num(rate), enabled: on };
     }
-    if (isNew) state.people.push(p);
+    if (isNew) {
+      // Aynı isim zaten varsa yeni kişi açma, mevcut kişiyi güncelle
+      const same = state.people.find(x => norm(x.name) === norm(p.name));
+      if (same) {
+        if (p.phone) same.phone = p.phone;
+        same.aliases = [...new Set([...(same.aliases || []), ...p.aliases])];
+        for (const [k, v] of Object.entries(p.prices)) same.prices = { ...(same.prices || {}), [k]: v };
+        p = same;
+      } else state.people.push(p);
+    }
     save(); render();
     after && after(p);
   });
