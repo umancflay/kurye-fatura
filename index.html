@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b3b36">
+<meta name="robots" content="noindex">
+<title>Kurye Fatura Paneli</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M9 12l7-4 7 4v8l-7 4-7-4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M9 12l7 4 7-4M16 16v8' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z M4 7.5l8 4.5 8-4.5 M12 12v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-img" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.8" fill="currentColor"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5M16 5.2a3.5 3.5 0 0 1 0 6.6M18.5 14.8c1.7.7 2.8 2.4 3 5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-wa" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.8 8.3c.2-.4.5-.4.8-.4h.5c.2 0 .4.1.5.4l.7 1.7c.1.2 0 .5-.1.7l-.5.6c-.1.2-.1.4 0 .5.6 1 1.4 1.8 2.4 2.4.2.1.4.1.5 0l.6-.5c.2-.2.5-.2.7-.1l1.7.7c.3.1.4.3.4.5v.5c0 .3 0 .6-.4.8-.6.4-1.6.6-2.6.2-2.3-.9-4.1-2.7-5-5-.4-1-.2-2 .3-2.6Z" fill="currentColor"/></symbol>
+</svg>
+
+<!-- GİRİŞ -->
+<section id="auth" class="auth" hidden>
+  <div class="auth-card">
+    <div class="brand big"><span class="mark"><svg><use href="#i-box"/></svg></span><div><strong>Kurye Fatura</strong><small>Paket hakediş paneli</small></div></div>
+    <form id="loginForm">
+      <label>E-posta<input type="email" name="email" autocomplete="username" required></label>
+      <label>Şifre<input type="password" name="password" autocomplete="current-password" required></label>
+      <button type="submit" class="block" id="loginBtn">Giriş yap</button>
+      <p class="form-msg" id="loginMsg"></p>
+    </form>
+    <div id="setupMsg" class="notice" hidden>
+      Bu kurulumda Supabase bağlantısı henüz yapılmamış. <code>config.js</code> dosyasına Supabase adresini ve anon anahtarını gir.
+    </div>
+  </div>
+  <footer class="credit">Created by <b>Voo Game Studio</b></footer>
+</section>
+
+<!-- UYGULAMA -->
+<div id="app" hidden>
+  <header class="top">
+    <div class="brand"><span class="mark"><svg><use href="#i-box"/></svg></span><div><strong>Kurye Fatura</strong><small id="syncState">hazır</small></div></div>
+    <div class="period">
+      <button class="icon" id="prevMonth" aria-label="Önceki ay">‹</button>
+      <input type="month" id="period" aria-label="Dönem">
+      <button class="icon" id="nextMonth" aria-label="Sonraki ay">›</button>
+    </div>
+    <button class="icon ghost" id="logoutBtn" title="Çıkış yap" aria-label="Çıkış yap"><svg><use href="#i-out"/></svg></button>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="donem" class="active"><svg><use href="#i-cal"/></svg><span>Dönem</span></button>
+    <button data-tab="yukle"><svg><use href="#i-img"/></svg><span>Yükle</span></button>
+    <button data-tab="kisiler"><svg><use href="#i-users"/></svg><span>Kişiler</span></button>
+    <button data-tab="ayarlar"><svg><use href="#i-gear"/></svg><span>Ayarlar</span></button>
+  </nav>
+
+  <main>
+    <!-- DÖNEM -->
+    <section id="tab-donem" class="tab active">
+      <div class="summary" id="summary"></div>
+      <div class="toolbar">
+        <input type="search" id="search" placeholder="Kişi ara…">
+        <button id="bulkSend" class="wa"><svg><use href="#i-wa"/></svg>Sırayla gönder</button>
+      </div>
+      <div id="periodList" class="list"></div>
+    </section>
+
+    <!-- YÜKLE -->
+    <section id="tab-yukle" class="tab">
+      <label class="drop" id="drop">
+        <input type="file" id="shotInput" accept="image/*" multiple hidden>
+        <span class="drop-icon"><svg><use href="#i-img"/></svg></span>
+        <strong>Ekran görüntüsü seç</strong>
+        <span>veya buraya sürükle / Ctrl+V ile yapıştır · birden fazla seçebilirsin</span>
+      </label>
+      <p class="muted small" id="aiHint"></p>
+      <div id="shotQueue"></div>
+      <div id="review" hidden>
+        <h2>Okunan veriler</h2>
+        <p class="muted small">Kontrol et, gerekirse düzelt, sonra kaydet. Kayıt <b id="reviewPeriod"></b> dönemine yapılır.</p>
+        <label class="check"><input type="checkbox" id="addMode"> Mevcut sayıların üzerine ekle (kapalıysa üzerine yazar)</label>
+        <div id="reviewRows"></div>
+        <div class="row gap end">
+          <button class="secondary" id="reviewCancel">Vazgeç</button>
+          <button id="reviewSave">Kaydet</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- KİŞİLER -->
+    <section id="tab-kisiler" class="tab">
+      <div class="toolbar">
+        <input type="search" id="personSearch" placeholder="Kişi ara…">
+        <button id="addPerson">+ Kişi ekle</button>
+      </div>
+      <div id="personList" class="list"></div>
+    </section>
+
+    <!-- AYARLAR -->
+    <section id="tab-ayarlar" class="tab">
+      <div class="card">
+        <h2>Paket kategorileri ve standart fiyatlar</h2>
+        <p class="muted small">Kişiye özel fiyatlar Kişiler sekmesinden girilir; boş bırakılırsa buradaki fiyat kullanılır.</p>
+        <div id="catList"></div>
+        <button class="secondary" id="addCat">+ Kategori ekle</button>
+      </div>
+
+      <div class="card">
+        <h2>Ekstra giderler (yüzdelik)</h2>
+        <p class="muted small">Brüt toplam üzerinden hesaplanır. “Düş” fatura tutarından çıkarır, “Ekle” üstüne ekler. Kişiye özel oran Kişiler sekmesinden değiştirilebilir.</p>
+        <div id="expList"></div>
+        <button class="secondary" id="addExp">+ Gider ekle</button>
+      </div>
+
+      <div class="card">
+        <h2>Fatura görseli</h2>
+        <label>Firma / başlık<input id="company" placeholder="Örn. Depo Adı"></label>
+        <label>Alt not<input id="footerNote" placeholder="Örn. Lütfen bu tutara fatura kesiniz."></label>
+      </div>
+
+      <div class="card">
+        <h2>Ekran görüntüsü okuma (Claude)</h2>
+        <p class="muted small">Görüntüdeki isim ve paket sayılarını okumak için Claude API anahtarı gerekir. Hesabında saklanır, giriş yapan tüm cihazlarda çalışır.</p>
+        <label>API anahtarı<input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+        <label>Model<input id="model"></label>
+      </div>
+
+      <div class="card">
+        <h2>Yedek</h2>
+        <p class="muted small">Veriler hesabında otomatik kaydedilir. İstersen ek olarak dosya yedeği al.</p>
+        <div class="row gap">
+          <button class="secondary" id="exportBtn">JSON indir</button>
+          <label class="button secondary">JSON yükle<input type="file" id="importInput" accept="application/json" hidden></label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="credit">Created by <b>Voo Game Studio</b></footer>
+</div>
+
+<dialog id="modal"><form method="dialog" id="modalForm"></form></dialog>
+<div id="toast" role="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
