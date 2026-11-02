@@ -1047,8 +1047,10 @@ async function geminiCall(model, b64) {
   });
 }
 
-// Model adı kullanımdan kalkarsa hesabın erişebildiği en yeni "flash" modelini bulur
-async function latestGeminiFlash() {
+// Hesabın erişebildiği Gemini modelleri: en yeni "flash" önce, sonra "flash-lite", sonra "pro"
+let geminiModelsCache = null;
+async function geminiModels() {
+  if (geminiModelsCache) return geminiModelsCache;
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
     headers: { 'x-goog-api-key': state.geminiKey },
   });
@@ -1056,24 +1058,51 @@ async function latestGeminiFlash() {
   const names = (body.models || [])
     .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
     .map(m => m.name.replace(/^models\//, ''))
-    .filter(n => /flash/.test(n) && !/lite|tts|image|audio|live|exp|preview/.test(n));
+    .filter(n => /^gemini-/.test(n) && /flash|pro/.test(n) && !/tts|image|audio|live|exp|preview|thinking|embedding/.test(n));
   const ver = n => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
-  return names.sort((a, b) => ver(b) - ver(a) || a.length - b.length)[0];
+  const rank = n => (/lite/.test(n) ? 1 : /flash/.test(n) ? 0 : 2);
+  geminiModelsCache = names.sort((a, b) => rank(a) - rank(b) || ver(b) - ver(a) || a.length - b.length);
+  return geminiModelsCache;
 }
 
-async function readWithGemini(b64) {
-  let model = state.geminiModel || AI.gemini.model;
-  let r = await geminiCall(model, b64);
-  if (r.status === 404) {
-    const alt = await latestGeminiFlash();
-    if (alt && alt !== model) {
-      model = alt;
-      r = await geminiCall(model, b64);
-      if (r.ok) { state.geminiModel = model; save(); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Model yoğun / geçici hata: aynı modeli bir kez daha dene, olmazsa başka modele geç
+const busy = status => status === 429 || status === 500 || status === 503 || status === 504;
+
+async function readWithGemini(b64, onStatus = () => {}) {
+  const first = state.geminiModel || AI.gemini.model;
+  const tried = new Set();
+  let lastError = '';
+  const tryModel = async model => {
+    tried.add(model);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const r = await geminiCall(model, b64);
+      if (r.ok) return r;
+      const body = await r.json().catch(() => ({}));
+      lastError = body.error?.message || String(r.status);
+      if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini: ' + lastError);
+      if (!busy(r.status) || attempt) return null; // 404 vb. ya da ikinci denemede de yoğun
+      onStatus(`${model} yoğun, tekrar deneniyor…`);
+      await sleep(2000);
+    }
+    return null;
+  };
+
+  let r = await tryModel(first);
+  if (!r) {
+    const alternatives = (await geminiModels().catch(() => [])).filter(m => !tried.has(m)).slice(0, 4);
+    for (const model of alternatives) {
+      onStatus(`${model} modeli deneniyor…`);
+      r = await tryModel(model);
+      if (r) {
+        // Çalışan modeli hatırla; yoğunluk geçince Ayarlar'dan değiştirilebilir
+        if (model !== first) { state.geminiModel = model; save(); }
+        break;
+      }
     }
   }
+  if (!r) throw new Error('Gemini: ' + (lastError || 'yanıt alınamadı') + ' — birkaç dakika sonra tekrar dene');
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('Gemini: ' + (body.error?.message || r.status));
   return (body.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
 }
 
@@ -1081,7 +1110,9 @@ async function readScreenshot(file, onProgress) {
   if (engine() !== 'ocr' && aiReady()) {
     onProgress({ status: 'ai' });
     const b64 = await imageToBase64(file);
-    const text = engine() === 'gemini' ? await readWithGemini(b64) : await readWithClaude(b64);
+    const text = engine() === 'gemini'
+      ? await readWithGemini(b64, msg => onProgress({ status: 'ai', msg }))
+      : await readWithClaude(b64);
     return { found: parseAiJson(text), text, via: AI[engine()].label };
   }
   return { ...(await readWithOcr(file, onProgress)), via: 'OCR' };
@@ -1109,7 +1140,7 @@ function handleFiles(files) {
     ocrQueue = ocrQueue.then(async () => {
       try {
         const { found, text, via } = await readScreenshot(file, m => {
-          if (m.status === 'ai') st.textContent = `${AI[engine()].label} okuyor…`;
+          if (m.status === 'ai') st.textContent = m.msg || `${AI[engine()].label} okuyor…`;
           else if (m.status === 'recognizing text') st.textContent = `Okunuyor… %${Math.round(m.progress * 100)}`;
           else st.textContent = 'Okuma modülü hazırlanıyor (ilk seferde biraz sürer)…';
         });
