@@ -271,3 +271,5 @@ dialog img { max-width: 100%; border-radius: 12px; border: 1px solid var(--line)
 .rrow.newperson { border-color: var(--accent); }
 .badge.new { background: var(--accent-soft); color: var(--accent); }
 .badge.warn { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.setrow.tier { grid-template-columns: 1fr 1fr 1fr auto; }
+@media (max-width: 640px) { .setrow.tier { grid-template-columns: 1fr 1fr 1fr auto; margin-bottom: 8px; } .setrow.tier > :first-child { grid-column: auto; } }

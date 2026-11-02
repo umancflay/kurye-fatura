@@ -26,6 +26,14 @@ function defaultState() {
     company: '',
     footerNote: 'Lütfen bu tutara fatura kesiniz.',
     aiEngine: 'gemini',
+    // Hafta sonu bonusu: hafta sonu başına teslimat sayısına göre (max boş = üstü)
+    weekendTiers: [
+      { min: 50, max: 70, amount: 600 },
+      { min: 71, max: 80, amount: 700 },
+      { min: 81, max: 90, amount: 850 },
+      { min: 91, max: 110, amount: 1100 },
+      { min: 111, max: '', amount: 1500 },
+    ],
     updatedAt: 0,
   };
 }
@@ -132,9 +140,37 @@ const currentPeriod = () => $('#period').value;
 const personById = id => state.people.find(p => p.id === id);
 const record = (pid, period = currentPeriod()) => state.records[period]?.[pid];
 
+const WEEKEND = 'haftasonu';
+
+// Ayın hafta sonu sayısı = o aydaki cumartesi sayısı
+function weekendsIn(period) {
+  const [y, m] = period.split('-').map(Number);
+  let n = 0;
+  for (let d = 1; d <= new Date(y, m, 0).getDate(); d++) if (new Date(y, m - 1, d).getDay() === 6) n++;
+  return n || 4;
+}
+function weekendTier(perWeekend) {
+  const t = (state.weekendTiers || []).find(t => perWeekend >= num(t.min) && (t.max === '' || t.max == null || perWeekend <= num(t.max)));
+  return t ? num(t.amount) : 0;
+}
+// Ekranda sadece aylık toplam var: hafta sonu başına ortalamaya göre barem bulunur, hafta sonu sayısıyla çarpılır
+function weekendBonus(total, period = currentPeriod()) {
+  const weekends = weekendsIn(period);
+  const avg = Math.round(total / weekends);
+  const per = weekendTier(avg);
+  return { weekends, avg, per, amount: per * weekends };
+}
+
 function calc(person, rec) {
   const lines = state.categories.map(c => {
     const count = num(rec?.counts?.[c.id]);
+    if (c.id === WEEKEND) {
+      const b = weekendBonus(count);
+      return {
+        id: c.id, name: c.name + ' bonusu', count, price: b.per, amount: b.amount, bonus: true,
+        note: `${b.weekends} hafta sonu × ort. ${b.avg} paket → ${b.per ? money(b.per) + ' / hafta sonu' : 'barem altı'}`,
+      };
+    }
     const custom = person.prices?.[c.id];
     const price = custom === '' || custom == null ? num(c.price) : num(custom);
     return { id: c.id, name: c.name, count, price, amount: count * price };
@@ -147,7 +183,8 @@ function calc(person, rec) {
     return { id: e.id, name: e.name, mode: e.mode, rate, enabled, amount: gross * rate / 100 };
   }).filter(e => e.enabled && e.rate);
   const net = expenses.reduce((s, e) => s + (e.mode === 'add' ? e.amount : -e.amount), gross);
-  const packages = lines.reduce((s, l) => s + l.count, 0);
+  // Hafta sonu paketleri İlk/Birleşen içinde zaten sayılı, tekrar toplanmaz
+  const packages = lines.filter(l => !l.bonus).reduce((s, l) => s + l.count, 0);
   return { lines, gross, expenses, net, packages };
 }
 
@@ -355,7 +392,7 @@ function editPerson(p, presetName = '', after) {
     <h2 style="margin-top:14px">Kişiye özel fiyatlar</h2>
     <p class="muted small" style="margin:0">Boş bırak = standart fiyat.</p>
     <div class="grid-counts">
-      ${state.categories.map(c => `<label>${esc(c.name)}<input type="number" step="0.01" inputmode="decimal" name="price_${c.id}" placeholder="${num(c.price)}" value="${p.prices?.[c.id] ?? ''}"></label>`).join('')}
+      ${state.categories.filter(c => c.id !== WEEKEND).map(c => `<label>${esc(c.name)}<input type="number" step="0.01" inputmode="decimal" name="price_${c.id}" placeholder="${num(c.price)}" value="${p.prices?.[c.id] ?? ''}"></label>`).join('')}
     </div>
     ${state.expenses.length ? `<h2 style="margin-top:14px">Giderler</h2>
       ${state.expenses.map(e => {
@@ -377,7 +414,7 @@ function editPerson(p, presetName = '', after) {
     p.phone = f.phone.value.trim();
     p.aliases = f.aliases.value.split(',').map(s => s.trim()).filter(Boolean);
     p.prices = {};
-    for (const c of state.categories) { const v = f['price_' + c.id].value; if (v !== '') p.prices[c.id] = num(v); }
+    for (const c of state.categories) { const v = f['price_' + c.id]?.value ?? ''; if (v !== '') p.prices[c.id] = num(v); }
     p.expenses = {};
     for (const e of state.expenses) {
       const rate = f['exprate_' + e.id].value;
@@ -397,8 +434,10 @@ function renderSettings() {
     <div class="setrow" data-id="${c.id}">
       <input data-f="name" value="${esc(c.name)}" aria-label="Kategori adı">
       <input data-f="keys" value="${esc(c.keys ?? DEFAULT_KEYS[c.id] ?? c.name)}" aria-label="Ekran görüntüsündeki adları" title="Ekran görüntüsünde bu kategori hangi adlarla yazıyor (virgülle)">
-      <input data-f="price" type="number" step="0.01" inputmode="decimal" value="${c.price}" aria-label="Fiyat">
-      <span class="muted small">₺ / paket</span>
+      ${c.id === WEEKEND
+        ? '<span class="muted small" style="grid-column: span 2">bonus baremle hesaplanır ↓</span>'
+        : `<input data-f="price" type="number" step="0.01" inputmode="decimal" value="${c.price}" aria-label="Fiyat">
+      <span class="muted small">₺ / paket</span>`}
       <button class="danger" data-del>Sil</button>
     </div>`).join('');
   $('#expList').innerHTML = state.expenses.map(e => `
@@ -412,6 +451,15 @@ function renderSettings() {
       <label class="check"><input type="checkbox" data-f="enabled" ${e.enabled ? 'checked' : ''}> herkese</label>
       <button class="danger" data-del>Sil</button>
     </div>`).join('') || '<p class="muted small">Gider yok.</p>';
+  $('#tierList').innerHTML = (state.weekendTiers || []).map((t, i) => `
+    <div class="setrow tier" data-i="${i}">
+      <input data-t="min" type="number" inputmode="numeric" value="${t.min}" aria-label="En az">
+      <input data-t="max" type="number" inputmode="numeric" value="${t.max}" placeholder="üstü" aria-label="En çok">
+      <input data-t="amount" type="number" inputmode="decimal" value="${t.amount}" aria-label="Bonus">
+      <button class="danger" data-tdel>Sil</button>
+    </div>`).join('');
+  const wk = weekendsIn(currentPeriod());
+  $('#tierInfo').textContent = `${periodLabel(currentPeriod())}: ${wk} hafta sonu. Örnek: 323 paket → ort. ${Math.round(323 / wk)} → ${money(weekendBonus(323).amount)}.`;
   const active = document.activeElement;
   for (const id of ['company', 'footerNote', 'claudeKey', 'claudeModel', 'geminiKey', 'geminiModel']) {
     if (active !== $('#' + id)) $('#' + id).value = state[id] || '';
@@ -440,6 +488,23 @@ function bindList(sel, arr) {
   });
 }
 bindList('#catList', 'categories');
+$('#tierList').addEventListener('change', e => {
+  const i = +e.target.closest('[data-i]').dataset.i;
+  const f = e.target.dataset.t;
+  state.weekendTiers[i][f] = f === 'max' && e.target.value === '' ? '' : num(e.target.value);
+  state.weekendTiers.sort((a, b) => num(a.min) - num(b.min));
+  save(); render();
+});
+$('#tierList').addEventListener('click', e => {
+  if (!e.target.matches('[data-tdel]')) return;
+  state.weekendTiers.splice(+e.target.closest('[data-i]').dataset.i, 1);
+  save(); render();
+});
+$('#addTier').onclick = () => {
+  const last = state.weekendTiers[state.weekendTiers.length - 1];
+  state.weekendTiers.push({ min: last ? num(last.max || last.min) + 1 : 50, max: '', amount: 0 });
+  save(); render();
+};
 bindList('#expList', 'expenses');
 $('#addCat').onclick = () => { state.categories.push({ id: uid(), name: 'Yeni kategori', price: 0 }); save(); render(); };
 $('#addExp').onclick = () => { state.expenses.push({ id: uid(), name: 'Gider', rate: 0, mode: 'deduct', enabled: true }); save(); render(); };
@@ -1254,7 +1319,7 @@ function renderInvoice(pid) {
   const c = calc(p, record(pid));
   const W = 1080, P = 64, rowH = 64;
   const rows = c.lines.filter(l => l.count);
-  const H = 360 + rows.length * rowH + 90 + c.expenses.length * 56 + 190 + (state.footerNote ? 70 : 0);
+  const H = 360 + rows.length * rowH + rows.filter(l => l.note).length * 34 + 90 + c.expenses.length * 56 + 190 + (state.footerNote ? 70 : 0);
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
@@ -1280,8 +1345,12 @@ function renderInvoice(pid) {
     g.fillStyle = '#16201f'; g.font = font(500, 30);
     g.fillText(l.name, P, y);
     right(String(l.count), 560, y);
-    right(money(l.price), 780, y);
+    if (!l.bonus) right(money(l.price), 780, y);
     g.font = font(600, 30); right(money(l.amount), W - P, y);
+    if (l.note) {
+      y += 34;
+      g.fillStyle = '#5d6b69'; g.font = font(400, 22); g.fillText(l.note, P, y);
+    }
     y += 14;
     g.fillStyle = '#eef1f1'; g.fillRect(P, y, W - 2 * P, 1);
   }
@@ -1314,7 +1383,11 @@ function invoiceText(pid) {
   const p = personById(pid);
   const c = calc(p, record(pid));
   const lines = [`*${p.name}* — ${periodLabel(currentPeriod())}`, ''];
-  for (const l of c.lines.filter(l => l.count)) lines.push(`${l.name}: ${l.count} × ${money(l.price)} = ${money(l.amount)}`);
+  for (const l of c.lines.filter(l => l.count)) {
+    lines.push(l.bonus
+      ? `${l.name}: ${l.count} paket (${l.note}) = ${money(l.amount)}`
+      : `${l.name}: ${l.count} × ${money(l.price)} = ${money(l.amount)}`);
+  }
   lines.push('', `Toplam: ${money(c.gross)}`);
   for (const e of c.expenses) lines.push(`${e.name} %${e.rate}: ${e.mode === 'add' ? '+' : '−'}${money(e.amount)}`);
   lines.push(`*Kesilecek fatura: ${money(c.net)}*`);
