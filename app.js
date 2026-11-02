@@ -948,7 +948,7 @@ async function readWithOcr(file, onProgress) {
 
 const AI = {
   claude: { label: 'Claude', keyField: 'claudeKey', modelField: 'claudeModel', model: 'claude-sonnet-5-5' },
-  gemini: { label: 'Gemini', keyField: 'geminiKey', modelField: 'geminiModel', model: 'gemini-2.5-flash' },
+  gemini: { label: 'Gemini', keyField: 'geminiKey', modelField: 'geminiModel', model: 'gemini-3.6-flash' },
 };
 const engine = () => {
   const sel = state.aiEngine || 'gemini';
@@ -1044,7 +1044,7 @@ function geminiThinking(model) {
   return null;
 }
 
-const GEMINI_TIMEOUT = 45000;
+const GEMINI_TIMEOUT = 30000;
 async function geminiCall(model, b64) {
   const thinkingConfig = geminiThinking(model);
   const ctrl = new AbortController();
@@ -1086,34 +1086,26 @@ async function geminiModels() {
   return geminiModelsCache;
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-// Model yoğun / geçici hata: aynı modeli bir kez daha dene, olmazsa başka modele geç
-const busy = status => status === 429 || status === 500 || status === 503 || status === 504;
-
 async function readWithGemini(b64, onStatus = () => {}) {
   const first = state.geminiModel || AI.gemini.model;
   const tried = new Set();
   let lastError = '';
+  // Yoğun ya da kaldırılmış modelde beklemeden sıradakine geçilir (ölçüm: yoğun model 2–10 sn kaybettiriyor)
   const tryModel = async model => {
     tried.add(model);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const r = await geminiCall(model, b64);
-      if (r.ok) return r;
-      const body = await r.json().catch(() => ({}));
-      lastError = body.error?.message || String(r.status);
-      if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini: ' + lastError);
-      if (!busy(r.status) || attempt) return null; // 404 vb. ya da ikinci denemede de yoğun
-      onStatus(`${model} yoğun, tekrar deneniyor…`);
-      await sleep(1000);
-    }
+    const r = await geminiCall(model, b64);
+    if (r.ok) return r;
+    const body = await r.json().catch(() => ({}));
+    lastError = body.error?.message || String(r.status);
+    if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini: ' + lastError);
     return null;
   };
 
   let r = await tryModel(first);
   if (!r) {
-    const alternatives = (await geminiModels().catch(() => [])).filter(m => !tried.has(m)).slice(0, 4);
+    const alternatives = (await geminiModels().catch(() => [])).filter(m => !tried.has(m)).slice(0, 6);
     for (const model of alternatives) {
-      onStatus(`${model} modeli deneniyor…`);
+      onStatus(`Gemini yoğun, ${model} deneniyor…`);
       r = await tryModel(model);
       if (r) {
         // Çalışan modeli hatırla; yoğunluk geçince Ayarlar'dan değiştirilebilir
