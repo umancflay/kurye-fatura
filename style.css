@@ -295,3 +295,11 @@ body.demo .demo-badge { display: inline-block !important; }
 .demo-badge { background: #f59e0b; color: #1c1300; margin-left: 4px; }
 body.demo .top { border-bottom: 2px solid #f59e0b; }
 #demoBtn { margin-top: 10px; }
+.depot-sel { width: auto; max-width: 200px; font-weight: 700; padding: 7px 10px; }
+body.demo .depot-sel, body.demo .no-demo { display: none !important; }
+.setrow.depot { grid-template-columns: 1fr auto auto; }
+@media (max-width: 640px) {
+  .depot-sel { max-width: 120px; font-size: 13px; padding: 6px 8px; }
+  .setrow.depot { grid-template-columns: 1fr auto auto; margin-bottom: 8px; }
+  .setrow.depot > :first-child { grid-column: auto; }
+}

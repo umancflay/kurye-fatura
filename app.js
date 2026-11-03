@@ -38,7 +38,10 @@ function defaultState() {
   };
 }
 
-function cacheKey() { return STORE_KEY + ':' + (user?.id || 'anon'); }
+function cacheKey() {
+  const base = STORE_KEY + ':' + (user?.id || 'anon');
+  return demo || depotId === 'main' ? base : base + ':' + depotId;
+}
 function cacheLoad() {
   try { return JSON.parse(localStorage.getItem(cacheKey())) || {}; } catch { return {}; }
 }
@@ -47,6 +50,10 @@ function cacheSave() {
 }
 
 let user = null;
+// Depolar: her depo kurye_store'da ayrı satır; liste 'depolar' satırında
+const DEPOT_KEY = 'kuryeFatura.depot';
+let depots = [];
+let depotId = (() => { try { return localStorage.getItem(DEPOT_KEY) || 'main'; } catch { return 'main'; } })();
 let demo = false;
 let state = defaultState();
 
@@ -494,6 +501,7 @@ function editPerson(p, presetName = '', after) {
 /* ---------- Ayarlar ---------- */
 
 function renderSettings() {
+  if (!demo) renderDepots();
   $('#catList').innerHTML = state.categories.map(c => `
     <div class="setrow" data-id="${c.id}">
       <input data-f="name" value="${esc(c.name)}" aria-label="Kategori adı">
@@ -631,7 +639,7 @@ async function pushCloud() {
   pushTimer = null;
   if (!sb || !user || demo) return;
   const { error } = await sb.from('kurye_store').upsert({
-    id: 'main', data: state, updated_at: new Date().toISOString(), updated_by: user.email,
+    id: depotId, data: state, updated_at: new Date().toISOString(), updated_by: user.email,
   });
   if (error) { setSync('kayıt hatası!', error.message); toast('Kaydedilemedi: ' + error.message, 5000); return; }
   setSync('kaydedildi ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }));
@@ -639,7 +647,7 @@ async function pushCloud() {
 
 async function loadCloud() {
   setSync('yükleniyor…');
-  const { data, error } = await sb.from('kurye_store').select('data').eq('id', 'main').maybeSingle();
+  const { data, error } = await sb.from('kurye_store').select('data').eq('id', depotId).maybeSingle();
   if (error) throw error;
   const cached = cacheLoad();
   const remote = data?.data;
@@ -657,8 +665,110 @@ async function loadCloud() {
 // Diğer cihazda yapılan değişiklikleri sekmeye dönünce al
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && user && !demo && !pushTimer && !$('#modal').open && !pending.length) {
-    loadCloud().then(render).catch(() => setSync('bağlantı yok'));
+    loadDepots().then(loadCloud).then(render).catch(() => setSync('bağlantı yok'));
   }
+});
+
+/* ---------- Depolar ---------- */
+
+async function loadDepots() {
+  const { data, error } = await sb.from('kurye_store').select('data').eq('id', 'depolar').maybeSingle();
+  if (error) throw error;
+  depots = data?.data?.list || [];
+  if (!depots.length) {
+    depots = [{ id: 'main', name: 'Depo 1' }];
+    await saveDepots();
+  }
+  if (!depots.some(d => d.id === depotId)) setDepotId(depots[0].id);
+}
+
+async function saveDepots() {
+  const { error } = await sb.from('kurye_store').upsert({
+    id: 'depolar', data: { list: depots }, updated_at: new Date().toISOString(), updated_by: user.email,
+  });
+  if (error) toast('Kaydedilemedi: ' + error.message, 5000);
+}
+
+function setDepotId(id) {
+  depotId = id;
+  try { localStorage.setItem(DEPOT_KEY, id); } catch {}
+}
+
+async function switchDepot(id) {
+  if (id === depotId) return;
+  if (pushTimer) { clearTimeout(pushTimer); await pushCloud(); }
+  setDepotId(id);
+  pending = [];
+  $('#shotQueue').innerHTML = '';
+  try { await loadCloud(); } catch (e) { state = Object.assign(defaultState(), cacheLoad()); setSync('çevrimdışı', e.message); }
+  render();
+}
+
+// Yeni depo: fiyat, gider, barem ve okuma ayarları mevcut depodan; kuryeler boş
+async function addDepot() {
+  const name = (prompt('Depo adı') || '').trim();
+  if (!name) return;
+  const id = 'd_' + uid();
+  const st = defaultState();
+  for (const k of ['categories', 'expenses', 'weekendTiers', 'footerNote', 'aiEngine', 'geminiKey', 'geminiModel', 'claudeKey', 'claudeModel']) {
+    if (state[k] !== undefined) st[k] = JSON.parse(JSON.stringify(state[k]));
+  }
+  st.company = name;
+  st.migratedHaftasonu = st.migratedGemini = true;
+  st.updatedAt = Date.now();
+  const { error } = await sb.from('kurye_store').upsert({ id, data: st, updated_at: new Date().toISOString(), updated_by: user.email });
+  if (error) { toast('Eklenemedi: ' + error.message, 5000); return; }
+  depots.push({ id, name });
+  await saveDepots();
+  await switchDepot(id);
+  toast(`${name} eklendi`);
+}
+
+async function renameDepot(id, name) {
+  const d = depots.find(x => x.id === id);
+  if (!d || !name.trim()) return render();
+  d.name = name.trim();
+  await saveDepots();
+  render();
+}
+
+async function deleteDepot(id) {
+  const d = depots.find(x => x.id === id);
+  if (!d) return;
+  if (depots.length === 1) { toast('Son depo silinemez'); return; }
+  if (!confirm(`${d.name} silinsin mi? Bu deponun kuryeleri ve faturaları listeden kalkar.`)) return;
+  depots = depots.filter(x => x.id !== id);
+  await saveDepots();
+  if (id === depotId) await switchDepot(depots[0].id);
+  else render();
+  toast(`${d.name} silindi`);
+}
+
+function renderDepots() {
+  const sel = $('#depotSel');
+  sel.innerHTML = depots.map(d => `<option value="${d.id}" ${d.id === depotId ? 'selected' : ''}>${esc(d.name)}</option>`).join('') +
+    '<option value="__add">+ Depo ekle</option>';
+  sel.value = depotId;
+  $('#depotList').innerHTML = depots.map(d => `
+    <div class="setrow depot" data-dep="${d.id}">
+      <input value="${esc(d.name)}" aria-label="Depo adı">
+      <span class="muted small">${d.id === depotId ? 'açık' : ''}</span>
+      <button class="danger" data-depdel>Sil</button>
+    </div>`).join('');
+}
+
+$('#depotSel').onchange = e => {
+  const v = e.target.value;
+  if (v === '__add') { e.target.value = depotId; addDepot(); }
+  else switchDepot(v);
+};
+$('#addDepot').onclick = () => addDepot();
+$('#depotList').addEventListener('change', e => {
+  const row = e.target.closest('[data-dep]');
+  if (row && e.target.matches('input')) renameDepot(row.dataset.dep, e.target.value);
+});
+$('#depotList').addEventListener('click', e => {
+  if (e.target.matches('[data-depdel]')) deleteDepot(e.target.closest('[data-dep]').dataset.dep);
 });
 
 /* ---------- Giriş ---------- */
@@ -681,6 +791,7 @@ async function enterApp(session) {
     return;
   }
   try {
+    await loadDepots();
     await loadCloud();
   } catch (e) {
     state = Object.assign(defaultState(), cacheLoad());
