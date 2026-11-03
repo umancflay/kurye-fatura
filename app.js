@@ -408,6 +408,29 @@ function openModal(html, onClose, extra = {}) {
   dlg.returnValue = '';
   dlg.showModal();
 }
+// Tarayıcının kendi kutuları yerine panel tasarımında onay ve metin pencereleri
+function askConfirm(title, text = '', ok = 'Sil') {
+  return new Promise(resolve => openModal(`
+    <h2>${esc(title)}</h2>
+    ${text ? `<p class="muted">${esc(text)}</p>` : ''}
+    <div class="row gap end" style="margin-top:16px">
+      <button value="cancel" class="secondary">Vazgeç</button>
+      <button value="ok" class="${ok === 'Sil' ? 'danger-solid' : ''}">${esc(ok)}</button>
+    </div>`, (form, value) => resolve(value === 'ok')));
+}
+function askText(title, label, value = '', ok = 'Kaydet') {
+  return new Promise(resolve => {
+    openModal(`
+      <h2>${esc(title)}</h2>
+      <label>${esc(label)}<input name="text" value="${esc(value)}" autocomplete="off" required></label>
+      <div class="row gap end" style="margin-top:16px">
+        <button value="cancel" class="secondary" formnovalidate>Vazgeç</button>
+        <button value="ok">${esc(ok)}</button>
+      </div>`, (form, v) => resolve(v === 'ok' ? form.elements.text.value.trim() || null : null));
+    setTimeout(() => $('#modalForm input[name=text]')?.focus(), 50);
+  });
+}
+
 function closeModal() { const d = $('#modal'); d.onclose = null; d.close(); }
 
 /* ---------- Kişiler ---------- */
@@ -436,10 +459,13 @@ $('#personList').onclick = e => {
   if (!b) return;
   const p = personById(b.dataset.id);
   if (b.dataset.act === 'edit') editPerson(p);
-  if (b.dataset.act === 'del' && confirm(`${p.name} silinsin mi? Tüm dönem kayıtları da silinir.`)) {
-    state.people = state.people.filter(x => x.id !== p.id);
-    for (const per of Object.values(state.records)) delete per[p.id];
-    save(); render();
+  if (b.dataset.act === 'del') {
+    askConfirm(`${p.name} silinsin mi?`, 'Bu kişinin tüm aylık kayıtları da silinir.').then(ok => {
+      if (!ok) return;
+      state.people = state.people.filter(x => x.id !== p.id);
+      for (const per of Object.values(state.records)) delete per[p.id];
+      save(); render();
+    });
   }
 };
 
@@ -555,10 +581,11 @@ function bindList(sel, arr) {
     }
     save(); renderPeriod();
   });
-  $(sel).addEventListener('click', e => {
+  $(sel).addEventListener('click', async e => {
     if (!e.target.matches('[data-del]')) return;
     const id = e.target.closest('[data-id]').dataset.id;
-    if (!confirm('Silinsin mi?')) return;
+    const item = state[arr].find(x => x.id === id);
+    if (!await askConfirm(`${item?.name || 'Bu satır'} silinsin mi?`)) return;
     state[arr] = state[arr].filter(x => x.id !== id);
     save(); render();
   });
@@ -626,7 +653,7 @@ $('#importInput').onchange = async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.people)) throw new Error('geçersiz dosya');
-    if (!confirm('Mevcut veriler bu yedekle değiştirilsin mi?')) return;
+    if (!await askConfirm('Yedek yüklensin mi?', 'Bu depodaki mevcut veriler yedektekiyle değiştirilir.', 'Yükle')) return;
     state = Object.assign(defaultState(), data);
     save(); render(); toast('Yedek yüklendi');
   } catch (err) { toast('Yüklenemedi: ' + err.message); }
@@ -706,7 +733,7 @@ async function switchDepot(id) {
 
 // Yeni depo: fiyat, gider, barem ve okuma ayarları mevcut depodan; kuryeler boş
 async function addDepot() {
-  const name = (prompt('Depo adı') || '').trim();
+  const name = await askText('Yeni depo', 'Depo adı', '', 'Ekle');
   if (!name) return;
   const id = 'd_' + uid();
   const st = defaultState();
@@ -736,7 +763,7 @@ async function deleteDepot(id) {
   const d = depots.find(x => x.id === id);
   if (!d) return;
   if (depots.length === 1) { toast('Son depo silinemez'); return; }
-  if (!confirm(`${d.name} silinsin mi? Bu deponun kuryeleri ve faturaları listeden kalkar.`)) return;
+  if (!await askConfirm(`${d.name} silinsin mi?`, 'Bu deponun kuryeleri ve faturaları listeden kalkar.')) return;
   depots = depots.filter(x => x.id !== id);
   await saveDepots();
   if (id === depotId) await switchDepot(depots[0].id);
@@ -885,8 +912,8 @@ function exitDemo() {
 }
 
 $('#demoBtn').onclick = enterDemo;
-$('#demoReset').onclick = () => {
-  if (!confirm('Deneme verisi sıfırlansın mı?')) return;
+$('#demoReset').onclick = async () => {
+  if (!await askConfirm('Deneme verisi sıfırlansın mı?', '', 'Sıfırla')) return;
   state = demoState();
   borrowAiKeys();
   cacheSave();

@@ -303,3 +303,5 @@ body.demo .depot-sel, body.demo .no-demo { display: none !important; }
   .setrow.depot { grid-template-columns: 1fr auto auto; margin-bottom: 8px; }
   .setrow.depot > :first-child { grid-column: auto; }
 }
+button.danger-solid { background: var(--danger); color: #fff; }
+dialog h2 { font-size: 18px; }
