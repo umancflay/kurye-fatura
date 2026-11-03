@@ -180,9 +180,16 @@ function calc(person, rec) {
   const gross = lines.reduce((s, l) => s + l.amount, 0);
   const expenses = state.expenses.map(e => {
     const o = person.expenses?.[e.id] || {};
-    const enabled = o.enabled ?? e.enabled;
-    const rate = o.rate === '' || o.rate == null ? num(e.rate) : num(o.rate);
-    return { id: e.id, name: e.name, mode: e.mode, rate, enabled, amount: gross * rate / 100 };
+    const month = rec?.exp?.[e.id];
+    const hasMonth = month !== '' && month != null;
+    const enabled = hasMonth || (o.enabled ?? e.enabled);
+    const rate = hasMonth ? num(month) : o.rate === '' || o.rate == null ? num(e.rate) : num(o.rate);
+    const fixed = e.kind === 'fixed';
+    return {
+      id: e.id, name: e.name, mode: e.mode, rate, enabled, fixed,
+      label: fixed ? e.name : `${e.name} (%${rate.toLocaleString('tr-TR')})`,
+      amount: fixed ? rate : gross * rate / 100,
+    };
   }).filter(e => e.enabled && e.rate);
   const net = expenses.reduce((s, e) => s + (e.mode === 'add' ? e.amount : -e.amount), gross);
   // Hafta sonu paketleri İlk/Birleşen içinde zaten sayılı, tekrar toplanmaz
@@ -342,6 +349,15 @@ function editRecord(pid) {
     <div class="grid-counts">
       ${state.categories.map(c => `<label>${esc(c.name)}<input type="number" min="0" inputmode="numeric" name="${c.id}" value="${rec.counts[c.id] ?? ''}"></label>`).join('')}
     </div>
+    ${state.expenses.length ? `<h2 style="margin-top:14px">Bu ay</h2>
+    <div class="grid-counts">
+      ${state.expenses.map(e => {
+        const o = p.expenses?.[e.id] || {};
+        const def = o.rate === '' || o.rate == null ? num(e.rate) : num(o.rate);
+        const unit = e.kind === 'fixed' ? '₺' : '%';
+        return `<label>${esc(e.name)} (${unit} ${e.mode === 'add' ? 'ekle' : 'düş'})<input type="number" step="0.01" inputmode="decimal" name="exp_${e.id}" placeholder="${unit}${def}" value="${rec.exp?.[e.id] ?? ''}"></label>`;
+      }).join('')}
+    </div>` : ''}
     <div class="row gap end" style="margin-top:12px">
       ${record(pid) ? '<button type="button" class="danger" data-x="del">Dönem kaydını sil</button>' : ''}
       <button value="cancel" class="secondary">Vazgeç</button>
@@ -351,6 +367,12 @@ function editRecord(pid) {
     const counts = {};
     for (const c of state.categories) counts[c.id] = num(form.elements[c.id].value);
     setRecord(pid, counts, false);
+    const exp = {};
+    for (const e of state.expenses) {
+      const v = form.elements['exp_' + e.id]?.value ?? '';
+      if (v !== '') exp[e.id] = num(v);
+    }
+    state.records[currentPeriod()][pid].exp = exp;
     save(); render();
   }, { del: () => { delete state.records[currentPeriod()][pid]; save(); closeModal(); render(); } });
 }
@@ -359,7 +381,7 @@ function setRecord(pid, counts, add) {
   const period = currentPeriod();
   state.records[period] ??= {};
   const prev = state.records[period][pid];
-  const next = { counts: {}, updatedAt: Date.now() };
+  const next = { counts: {}, updatedAt: Date.now(), ...(prev?.exp && { exp: prev.exp }) };
   for (const c of state.categories) {
     next.counts[c.id] = (add ? num(prev?.counts?.[c.id]) : 0) + num(counts[c.id]);
   }
@@ -431,8 +453,8 @@ function editPerson(p, presetName = '', after) {
       ${state.expenses.map(e => {
         const o = p.expenses?.[e.id] || {};
         return `<div class="setrow" style="grid-template-columns:1fr 100px auto">
-          <span>${esc(e.name)} <span class="muted small">(${e.mode === 'add' ? 'ekle' : 'düş'})</span></span>
-          <input type="number" step="0.01" name="exprate_${e.id}" placeholder="%${num(e.rate)}" value="${o.rate ?? ''}">
+          <span>${esc(e.name)} <span class="muted small">(${e.kind === 'fixed' ? '₺' : '%'} ${e.mode === 'add' ? 'ekle' : 'düş'})</span></span>
+          <input type="number" step="0.01" name="exprate_${e.id}" placeholder="${e.kind === 'fixed' ? '₺' : '%'}${num(e.rate)}" value="${o.rate ?? ''}">
           <label class="check"><input type="checkbox" name="expon_${e.id}" ${(o.enabled ?? e.enabled) ? 'checked' : ''}> uygula</label>
         </div>`;
       }).join('')}` : ''}
@@ -485,10 +507,10 @@ function renderSettings() {
   $('#expList').innerHTML = state.expenses.map(e => `
     <div class="setrow exp" data-id="${e.id}">
       <input data-f="name" value="${esc(e.name)}" aria-label="Gider adı">
-      <input data-f="rate" type="number" step="0.01" inputmode="decimal" value="${e.rate}" aria-label="Yüzde">
-      <select data-f="mode" aria-label="Yön">
-        <option value="deduct" ${e.mode !== 'add' ? 'selected' : ''}>% düş</option>
-        <option value="add" ${e.mode === 'add' ? 'selected' : ''}>% ekle</option>
+      <input data-f="rate" type="number" step="0.01" inputmode="decimal" value="${e.rate}" aria-label="Değer">
+      <select data-f="type" aria-label="Tür">
+        ${[['percent', 'deduct', '% düş'], ['percent', 'add', '% ekle'], ['fixed', 'deduct', '₺ düş'], ['fixed', 'add', '₺ ekle']]
+          .map(([k, m, t]) => `<option value="${k}-${m}" ${(e.kind || 'percent') === k && (e.mode || 'deduct') === m ? 'selected' : ''}>${t}</option>`).join('')}
       </select>
       <label class="check"><input type="checkbox" data-f="enabled" ${e.enabled ? 'checked' : ''}> herkese</label>
       <button class="danger" data-del>Sil</button>
@@ -516,7 +538,13 @@ function bindList(sel, arr) {
     if (!row) return;
     const item = state[arr].find(x => x.id === row.dataset.id);
     const f = e.target.dataset.f;
-    item[f] = e.target.type === 'checkbox' ? e.target.checked : (f === 'price' || f === 'rate') ? num(e.target.value) : e.target.value;
+    if (f === 'type') {
+      const [kind, mode] = e.target.value.split('-');
+      item.kind = kind;
+      item.mode = mode;
+    } else {
+      item[f] = e.target.type === 'checkbox' ? e.target.checked : (f === 'price' || f === 'rate') ? num(e.target.value) : e.target.value;
+    }
     save(); renderPeriod();
   });
   $(sel).addEventListener('click', e => {
@@ -547,7 +575,7 @@ $('#addTier').onclick = () => {
 };
 bindList('#expList', 'expenses');
 $('#addCat').onclick = () => { state.categories.push({ id: uid(), name: 'Yeni kategori', price: 0 }); save(); render(); };
-$('#addExp').onclick = () => { state.expenses.push({ id: uid(), name: 'Gider', rate: 0, mode: 'deduct', enabled: true }); save(); render(); };
+$('#addExp').onclick = () => { state.expenses.push({ id: uid(), name: 'Gider', rate: 0, kind: 'percent', mode: 'deduct', enabled: true }); save(); render(); };
 for (const id of ['company', 'footerNote', 'claudeKey', 'claudeModel', 'geminiKey', 'geminiModel', 'aiEngine']) {
   $('#' + id).onchange = e => { state[id] = e.target.value.trim(); save(); render(); };
 }
@@ -1464,7 +1492,7 @@ function renderInvoice(pid) {
   for (const e of c.expenses) {
     y += 56;
     g.fillStyle = e.mode === 'add' ? '#15803d' : '#b42318'; g.font = font(500, 28);
-    g.fillText(`${e.name} (%${e.rate.toLocaleString('tr-TR')})`, P, y);
+    g.fillText(e.label, P, y);
     right((e.mode === 'add' ? '+ ' : '− ') + money(e.amount), W - P, y);
   }
 
@@ -1489,7 +1517,7 @@ function invoiceText(pid) {
     lines.push(l.bonus ? `${l.name}: ${money(l.amount)}` : `${l.name}: ${l.count} × ${money(l.price)} = ${money(l.amount)}`);
   }
   lines.push('', `Toplam: ${money(c.gross)}`);
-  for (const e of c.expenses) lines.push(`${e.name} %${e.rate}: ${e.mode === 'add' ? '+' : '−'}${money(e.amount)}`);
+  for (const e of c.expenses) lines.push(`${e.label}: ${e.mode === 'add' ? '+' : '−'}${money(e.amount)}`);
   lines.push(`*Kesilecek fatura: ${money(c.net)}*`);
   if (state.footerNote) lines.push('', state.footerNote);
   return lines.join('\n');
